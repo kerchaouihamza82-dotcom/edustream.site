@@ -2,15 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
-declare global {
-  interface Window {
-    YT: {
-      Player: new (el: string | HTMLElement, opts: object) => any;
-      PlayerState: { PLAYING: number; PAUSED: number; ENDED: number };
-    };
-    onYouTubeIframeAPIReady: () => void;
-  }
-}
+
 
 function fmt(s: number) {
   const t = Math.floor(s || 0);

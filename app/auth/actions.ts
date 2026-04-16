@@ -3,22 +3,23 @@
 import { createClient } from "@/lib/supabase/server";
 import { headers } from "next/headers";
 
-function usernameToEmail(username: string) {
-  return `${username.trim().toLowerCase()}@app.local`;
-}
-
-export async function signIn(username: string, password: string) {
+export async function signIn(email: string, password: string) {
   const supabase = await createClient();
-  const email = usernameToEmail(username);
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await supabase.auth.signInWithPassword({
+    email: email.trim().toLowerCase(),
+    password,
+  });
 
   if (error) {
     if (
       error.message.includes("Invalid login credentials") ||
       error.message.includes("invalid_credentials")
     ) {
-      return { error: "Credenciales incorrectas. Verifica tu usuario y contraseña." };
+      return { error: "Credenciales incorrectas. Verifica tu email y contraseña." };
+    }
+    if (error.message.includes("Email not confirmed")) {
+      return { error: "Confirma tu email antes de iniciar sesión." };
     }
     return { error: error.message };
   }
@@ -26,27 +27,17 @@ export async function signIn(username: string, password: string) {
   return { error: null };
 }
 
-export async function signUp(username: string, password: string) {
+export async function signUp(email: string, password: string) {
   const supabase = await createClient();
-  const email = usernameToEmail(username);
+  const normalizedEmail = email.trim().toLowerCase();
+
   const headerStore = await headers();
   const ip =
     headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     headerStore.get("x-real-ip") ??
     "unknown";
 
-  // 1. Check username already exists
-  const { data: existing } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("username", username.trim().toLowerCase())
-    .maybeSingle();
-
-  if (existing) {
-    return { error: "Este nombre de usuario ya está en uso." };
-  }
-
-  // 2. Check IP registration limit (max 3)
+  // Check IP registration limit (max 3)
   const { data: reg } = await supabase
     .from("registrations")
     .select("count")
@@ -57,12 +48,11 @@ export async function signUp(username: string, password: string) {
     return { error: "Has alcanzado el límite de 3 cuentas por IP." };
   }
 
-  // 3. Register the user (email confirmation disabled in Supabase dashboard)
+  // Register the user
   const { data, error: signUpError } = await supabase.auth.signUp({
-    email,
+    email: normalizedEmail,
     password,
     options: {
-      data: { username: username.trim().toLowerCase() },
       emailRedirectTo:
         process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
         undefined,
@@ -70,8 +60,11 @@ export async function signUp(username: string, password: string) {
   });
 
   if (signUpError) {
-    if (signUpError.message.includes("already registered")) {
-      return { error: "Este nombre de usuario ya está en uso." };
+    if (
+      signUpError.message.includes("already registered") ||
+      signUpError.message.includes("User already registered")
+    ) {
+      return { error: "Este email ya tiene una cuenta. Inicia sesión." };
     }
     return { error: signUpError.message };
   }
@@ -81,12 +74,12 @@ export async function signUp(username: string, password: string) {
     return { error: "No se pudo crear la cuenta. Inténtalo de nuevo." };
   }
 
-  // 4. Insert / upsert profile (trigger also does this, but be explicit)
+  // Upsert profile
   await supabase
     .from("profiles")
-    .upsert({ id: userId, username: username.trim().toLowerCase() });
+    .upsert({ id: userId, username: normalizedEmail.split("@")[0] });
 
-  // 5. Upsert IP registration count
+  // Track IP registrations
   if (reg) {
     await supabase
       .from("registrations")

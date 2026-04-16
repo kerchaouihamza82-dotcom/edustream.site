@@ -7,7 +7,7 @@ import { signIn, signUp } from "../actions";
 export default function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -17,8 +17,12 @@ export default function AuthPage() {
     e.preventDefault();
     setError(null);
 
-    if (!username.trim() || !password) {
+    if (!email.trim() || !password) {
       setError("Completa todos los campos.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Ingresa un email válido.");
       return;
     }
 
@@ -37,8 +41,8 @@ export default function AuthPage() {
     try {
       const result =
         mode === "login"
-          ? await signIn(username, password)
-          : await signUp(username, password);
+          ? await signIn(email, password)
+          : await signUp(email, password);
 
       if (result.error) {
         setError(result.error);
@@ -239,17 +243,17 @@ export default function AuthPage() {
 
           <form onSubmit={handleSubmit} noValidate>
             <div className="form-group">
-              <label className="form-label" htmlFor="username">
-                Nombre de usuario
+              <label className="form-label" htmlFor="email">
+                Email
               </label>
               <input
-                id="username"
+                id="email"
                 className="form-input"
-                type="text"
-                autoComplete="username"
-                placeholder="tu_usuario"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                type="email"
+                autoComplete="email"
+                placeholder="tu@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
               />
             </div>

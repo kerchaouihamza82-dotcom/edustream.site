@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { createClient } from "@/lib/supabase/client";
+import { signOut } from "@/app/auth/actions";
+import type { User } from "@supabase/supabase-js";
 
 /* ─── Types ────────────────────────────────────────────────── */
 interface VideoEntry {
@@ -15,27 +18,11 @@ interface VideoEntry {
 
 type View = "add" | "library" | "player";
 
-/* ─── Storage helpers ──────────────────────────────────────── */
-const DB_KEY = "edustream_videos";
-
-function loadDB(): VideoEntry[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(DB_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveDB(arr: VideoEntry[]) {
-  localStorage.setItem(DB_KEY, JSON.stringify(arr));
-}
-
+/* ─── Helpers ──────────────────────────────────────────────── */
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
-/* ─── YouTube helpers ──────────────────────────────────────── */
 function extractYouTubeId(url: string): string | null {
   const patterns = [
     /(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^&?#\s]{11})/,
@@ -52,9 +39,9 @@ function thumbUrl(ytId: string) {
   return `https://img.youtube.com/vi/${ytId}/mqdefault.jpg`;
 }
 
-function platformLink(entryId: string) {
+function platformLink(slug: string) {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}?v=${entryId}`;
+  return `${window.location.origin}?v=${slug}`;
 }
 
 function formatTime(s: number) {
@@ -68,7 +55,7 @@ function formatTime(s: number) {
   return `${m}:${ss}`;
 }
 
-/* ─── Toast type ───────────────────────────────────────────── */
+/* ─── Toast ────────────────────────────────────────────────── */
 interface ToastItem {
   id: number;
   msg: string;
@@ -104,6 +91,12 @@ interface YTPlayerInstance {
 ══════════════════════════════════════════════════════════════ */
 export default function EduStreamApp() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [user, setUser] = useState<User | null>(null);
+  const [username, setUsername] = useState<string>("");
+  const [authLoading, setAuthLoading] = useState(true);
 
   const [view, setView] = useState<View>("add");
 
@@ -117,6 +110,7 @@ export default function EduStreamApp() {
   /* ─── Library ────────────────────────────── */
   const [db, setDb] = useState<VideoEntry[]>([]);
   const [filter, setFilter] = useState("");
+  const [dbLoading, setDbLoading] = useState(false);
 
   /* ─── Player ─────────────────────────────── */
   const [currentEntry, setCurrentEntry] = useState<VideoEntry | null>(null);
@@ -145,10 +139,66 @@ export default function EduStreamApp() {
     []
   );
 
-  /* ─── Load DB on mount ───────────────────── */
+  /* ─── Auth state ─────────────────────────── */
   useEffect(() => {
-    setDb(loadDB());
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+      if (user?.user_metadata?.username) {
+        setUsername(user.user_metadata.username);
+      } else if (user) {
+        // Fallback: derive from email
+        setUsername(user.email?.replace("@app.local", "") ?? "");
+      }
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      const u = session?.user;
+      if (u?.user_metadata?.username) {
+        setUsername(u.user_metadata.username);
+      } else if (u) {
+        setUsername(u.email?.replace("@app.local", "") ?? "");
+      } else {
+        setUsername("");
+      }
+    });
+
+    return () => subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* ─── Load DB from Supabase ──────────────── */
+  const loadVideos = useCallback(async () => {
+    if (!user) return;
+    setDbLoading(true);
+    const { data, error } = await supabase
+      .from("videos")
+      .select("id, youtube_id, title, description, created_at, slug")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      toast("Error cargando la biblioteca", "error");
+    } else {
+      setDb(
+        (data ?? []).map((v) => ({
+          id: v.slug ?? v.id,
+          ytId: v.youtube_id,
+          title: v.title,
+          category: v.description ?? "Sin categoría",
+          added: v.created_at,
+        }))
+      );
+    }
+    setDbLoading(false);
+  }, [user, supabase, toast]);
+
+  useEffect(() => {
+    if (user) loadVideos();
+    else setDb([]);
+  }, [user, loadVideos]);
 
   /* ─── Progress timer ─────────────────────── */
   const startProgressTimer = useCallback(() => {
@@ -228,19 +278,36 @@ export default function EduStreamApp() {
 
   /* ─── Deep link ?v= ──────────────────────── */
   useEffect(() => {
+    if (authLoading) return;
     const vid = searchParams.get("v");
-    if (vid) {
-      const entries = loadDB();
-      setDb(entries);
-      const entry = entries.find((e) => e.id === vid);
-      if (entry) {
+    if (!vid) return;
+
+    async function loadDeepLink() {
+      // Try Supabase first (public read policy on videos)
+      const { data } = await supabase
+        .from("videos")
+        .select("id, youtube_id, title, description, created_at, slug")
+        .eq("slug", vid)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (data) {
+        const entry: VideoEntry = {
+          id: data.slug ?? data.id,
+          ytId: data.youtube_id,
+          title: data.title,
+          category: data.description ?? "Sin categoría",
+          added: data.created_at,
+        };
         openPlayerEntry(entry);
       } else {
         toast("Video no encontrado en esta plataforma", "error");
       }
     }
+
+    loadDeepLink();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading]);
 
   /* ─── Open player ────────────────────────── */
   function openPlayerEntry(entry: VideoEntry) {
@@ -262,7 +329,12 @@ export default function EduStreamApp() {
   }
 
   /* ─── Add video ──────────────────────────── */
-  function addVideo() {
+  async function addVideo() {
+    if (!user) {
+      router.push("/auth/login");
+      return;
+    }
+
     if (!ytUrl.trim()) {
       toast("Introduce un enlace de YouTube", "error");
       return;
@@ -272,22 +344,59 @@ export default function EduStreamApp() {
       toast("Enlace de YouTube no válido", "error");
       return;
     }
-    const current = loadDB();
-    if (current.find((e) => e.ytId === ytId)) {
-      toast("Este video ya existe en la biblioteca", "error");
+
+    // Check duplicate for this user
+    const { data: existing } = await supabase
+      .from("videos")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("youtube_id", ytId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (existing) {
+      toast("Este video ya existe en tu biblioteca", "error");
       return;
     }
+
+    const slug = genId();
+
+    const { data: inserted, error } = await supabase
+      .from("videos")
+      .insert({
+        user_id: user.id,
+        youtube_id: ytId,
+        title: ytTitle.trim() || "Video sin título",
+        description: ytCategory.trim() || "Sin categoría",
+        slug,
+        is_active: true,
+        views: 0,
+      })
+      .select("id, youtube_id, title, description, created_at, slug")
+      .single();
+
+    if (error || !inserted) {
+      toast("Error al añadir el video", "error");
+      return;
+    }
+
     const entry: VideoEntry = {
-      id: genId(),
-      ytId,
-      title: ytTitle.trim() || "Video sin título",
-      category: ytCategory.trim() || "Sin categoría",
-      added: new Date().toISOString(),
+      id: inserted.slug ?? inserted.id,
+      ytId: inserted.youtube_id,
+      title: inserted.title,
+      category: inserted.description ?? "Sin categoría",
+      added: inserted.created_at,
     };
-    const updated = [entry, ...current];
-    saveDB(updated);
-    setDb(updated);
-    setGeneratedLink(platformLink(entry.id));
+
+    // Save generated link to links table
+    const link = platformLink(entry.id);
+    await supabase.from("links").insert({
+      user_id: user.id,
+      url: link,
+    });
+
+    setDb((prev) => [entry, ...prev]);
+    setGeneratedLink(link);
     setLastEntry(entry);
     toast("Video añadido correctamente");
   }
@@ -300,11 +409,17 @@ export default function EduStreamApp() {
     setLastEntry(null);
   }
 
-  /* ─── Library ────────────────────────────── */
-  function deleteVideo(id: string) {
-    const updated = db.filter((e) => e.id !== id);
-    saveDB(updated);
-    setDb(updated);
+  /* ─── Delete video ───────────────────────── */
+  async function deleteVideo(id: string) {
+    if (!user) return;
+    // Soft delete via is_active = false
+    await supabase
+      .from("videos")
+      .update({ is_active: false })
+      .eq("slug", id)
+      .eq("user_id", user.id);
+
+    setDb((prev) => prev.filter((e) => e.id !== id));
     toast("Video eliminado");
   }
 
@@ -360,10 +475,7 @@ export default function EduStreamApp() {
     const p = ytPlayerRef.current;
     if (!p || typeof p.getDuration !== "function") return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const pct = Math.max(
-      0,
-      Math.min(1, (e.clientX - rect.left) / rect.width)
-    );
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     p.seekTo(p.getDuration() * pct, true);
   }
 
@@ -373,6 +485,13 @@ export default function EduStreamApp() {
     if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     setIsPlaying(false);
     setView("library");
+  }
+
+  async function handleSignOut() {
+    await signOut();
+    setUser(null);
+    setDb([]);
+    router.push("/auth/login");
   }
 
   /* ─── Derived values ─────────────────────── */
@@ -419,6 +538,7 @@ export default function EduStreamApp() {
           0%, 100% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.4); opacity: 0.6; }
         }
+        .header-right { display: flex; align-items: center; gap: 12px; }
         .nav-tabs {
           display: flex; gap: 4px;
           background: var(--surface);
@@ -434,6 +554,35 @@ export default function EduStreamApp() {
         }
         .nav-tab.active { background: var(--card); color: var(--text); }
         .nav-tab:hover:not(.active) { color: var(--text); }
+
+        .user-pill {
+          display: flex; align-items: center; gap: 8px;
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 10px; padding: 6px 14px;
+        }
+        .user-avatar {
+          width: 24px; height: 24px; border-radius: 50%;
+          background: var(--accent);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 0.72rem; font-weight: 700; color: #0a0a0f;
+        }
+        .user-name { font-size: 0.85rem; font-weight: 500; color: var(--text); }
+        .sign-out-btn {
+          background: none; border: none;
+          color: var(--muted); font-family: var(--font-body);
+          font-size: 0.8rem; cursor: pointer; padding: 0;
+          transition: color 0.2s;
+        }
+        .sign-out-btn:hover { color: var(--danger); }
+        .sign-in-btn {
+          padding: 8px 18px; border-radius: 8px;
+          background: var(--accent); color: #0a0a0f;
+          border: none; font-family: var(--font-body);
+          font-weight: 600; font-size: 0.85rem;
+          cursor: pointer; transition: all 0.2s;
+        }
+        .sign-in-btn:hover { filter: brightness(1.08); }
 
         main { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
 
@@ -459,6 +608,20 @@ export default function EduStreamApp() {
           position: absolute; top: 0; left: 0; right: 0; height: 1px;
           background: linear-gradient(90deg, transparent, var(--accent), transparent);
           opacity: 0.4;
+        }
+
+        .auth-prompt {
+          text-align: center; padding: 60px 32px;
+        }
+        .auth-prompt-title {
+          font-family: var(--font-head);
+          font-size: 1.4rem; font-weight: 700;
+          margin-bottom: 12px;
+        }
+        .auth-prompt-desc {
+          color: var(--muted); font-size: 0.9rem;
+          margin-bottom: 24px; max-width: 360px; margin-inline: auto;
+          line-height: 1.6;
         }
 
         .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -721,24 +884,47 @@ export default function EduStreamApp() {
             <div className="logo-dot" />
             Edu<span>Stream</span>
           </div>
-          <div className="nav-tabs">
-            <button
-              className={`nav-tab${view === "add" ? " active" : ""}`}
-              onClick={() => setView("add")}
-            >
-              + Añadir Video
-            </button>
-            <button
-              className={`nav-tab${
-                view === "library" || view === "player" ? " active" : ""
-              }`}
-              onClick={() => {
-                setView("library");
-                setFilter("");
-              }}
-            >
-              Biblioteca
-            </button>
+          <div className="header-right">
+            {!authLoading && user && (
+              <div className="nav-tabs">
+                <button
+                  className={`nav-tab${view === "add" ? " active" : ""}`}
+                  onClick={() => setView("add")}
+                >
+                  + Añadir Video
+                </button>
+                <button
+                  className={`nav-tab${
+                    view === "library" || view === "player" ? " active" : ""
+                  }`}
+                  onClick={() => {
+                    setView("library");
+                    setFilter("");
+                  }}
+                >
+                  Biblioteca
+                </button>
+              </div>
+            )}
+
+            {!authLoading && user ? (
+              <div className="user-pill">
+                <div className="user-avatar">
+                  {username.charAt(0).toUpperCase()}
+                </div>
+                <span className="user-name">{username}</span>
+                <button className="sign-out-btn" onClick={handleSignOut}>
+                  Salir
+                </button>
+              </div>
+            ) : !authLoading ? (
+              <button
+                className="sign-in-btn"
+                onClick={() => router.push("/auth/login")}
+              >
+                Iniciar sesión
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -752,83 +938,96 @@ export default function EduStreamApp() {
               <div className="section-title">Añadir nuevo video</div>
 
               <div className="card">
-                <div className="input-row">
-                  <div className="input-group full">
-                    <label htmlFor="yt-url">Enlace de YouTube</label>
-                    <input
-                      id="yt-url"
-                      type="text"
-                      value={ytUrl}
-                      onChange={(e) => setYtUrl(e.target.value)}
-                      placeholder="https://www.youtube.com/watch?v=... o https://youtu.be/..."
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label htmlFor="yt-title">Título del curso / clase</label>
-                    <input
-                      id="yt-title"
-                      type="text"
-                      value={ytTitle}
-                      onChange={(e) => setYtTitle(e.target.value)}
-                      placeholder="Ej: Introducción a JavaScript — Clase 1"
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label htmlFor="yt-category">Categoría (opcional)</label>
-                    <input
-                      id="yt-category"
-                      type="text"
-                      value={ytCategory}
-                      onChange={(e) => setYtCategory(e.target.value)}
-                      placeholder="Ej: Programación, Diseño, Marketing…"
-                    />
-                  </div>
-                </div>
-
-                <div className="actions">
-                  <button className="btn btn-primary" onClick={addVideo}>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
+                {!user ? (
+                  <div className="auth-prompt">
+                    <div className="auth-prompt-title">
+                      Inicia sesión para continuar
+                    </div>
+                    <div className="auth-prompt-desc">
+                      Debes tener una cuenta para añadir videos y generar
+                      enlaces de plataforma personalizados.
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => router.push("/auth/login")}
                     >
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                    Añadir a la plataforma
-                  </button>
-                  <button className="btn btn-ghost" onClick={clearForm}>
-                    Limpiar
-                  </button>
-                </div>
-
-                {generatedLink && (
-                  <div className="link-result">
-                    <div className="link-result-label">
-                      Enlace de plataforma generado
-                    </div>
-                    <div className="link-copy-row">
-                      <div className="link-url">{generatedLink}</div>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() =>
-                          navigator.clipboard
-                            .writeText(generatedLink)
-                            .then(() => toast("Enlace copiado al portapapeles"))
-                        }
-                      >
-                        Copiar
-                      </button>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => lastEntry && openPlayerEntry(lastEntry)}
-                      >
-                        Ver
-                      </button>
-                    </div>
+                      Iniciar sesión o registrarse
+                    </button>
                   </div>
+                ) : (
+                  <>
+                    <div className="input-row">
+                      <div className="input-group full">
+                        <label htmlFor="yt-url">Enlace de YouTube</label>
+                        <input
+                          id="yt-url"
+                          type="text"
+                          value={ytUrl}
+                          onChange={(e) => setYtUrl(e.target.value)}
+                          placeholder="https://www.youtube.com/watch?v=... o https://youtu.be/..."
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label htmlFor="yt-title">Título del curso / clase</label>
+                        <input
+                          id="yt-title"
+                          type="text"
+                          value={ytTitle}
+                          onChange={(e) => setYtTitle(e.target.value)}
+                          placeholder="Ej: Introducción a JavaScript — Clase 1"
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label htmlFor="yt-category">Categoría (opcional)</label>
+                        <input
+                          id="yt-category"
+                          type="text"
+                          value={ytCategory}
+                          onChange={(e) => setYtCategory(e.target.value)}
+                          placeholder="Ej: Programación, Diseño, Marketing…"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="actions">
+                      <button className="btn btn-primary" onClick={addVideo}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                        Añadir a la plataforma
+                      </button>
+                      <button className="btn btn-ghost" onClick={clearForm}>
+                        Limpiar
+                      </button>
+                    </div>
+
+                    {generatedLink && (
+                      <div className="link-result">
+                        <div className="link-result-label">
+                          Enlace de plataforma generado
+                        </div>
+                        <div className="link-copy-row">
+                          <div className="link-url">{generatedLink}</div>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() =>
+                              navigator.clipboard
+                                .writeText(generatedLink)
+                                .then(() => toast("Enlace copiado al portapapeles"))
+                            }
+                          >
+                            Copiar
+                          </button>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => lastEntry && openPlayerEntry(lastEntry)}
+                          >
+                            Ver
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -836,13 +1035,7 @@ export default function EduStreamApp() {
 
               <div className="section-label">Información</div>
               <div className="section-title">¿Cómo funciona?</div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))",
-                  gap: "16px",
-                }}
-              >
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: "16px" }}>
                 {[
                   {
                     icon: "🔗",
@@ -860,37 +1053,17 @@ export default function EduStreamApp() {
                     desc: "Funciona con videos no listados o privados de YouTube siempre que tengas el enlace directo.",
                   },
                   {
-                    icon: "📦",
-                    title: "Biblioteca local",
-                    desc: "Todos tus videos se guardan en el navegador. Para producción, conecta un backend y una base de datos.",
+                    icon: "☁️",
+                    title: "Guardado en la nube",
+                    desc: "Todos tus videos se guardan en Supabase, accesibles desde cualquier dispositivo.",
                   },
                 ].map((item) => (
-                  <div
-                    className="card"
-                    key={item.title}
-                    style={{ padding: "20px" }}
-                  >
-                    <div
-                      style={{ fontSize: "1.6rem", marginBottom: "12px" }}
-                    >
-                      {item.icon}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "var(--font-head)",
-                        fontWeight: 600,
-                        marginBottom: "6px",
-                      }}
-                    >
+                  <div className="card" key={item.title} style={{ padding: "20px" }}>
+                    <div style={{ fontSize: "1.6rem", marginBottom: "12px" }}>{item.icon}</div>
+                    <div style={{ fontFamily: "var(--font-head)", fontWeight: 600, marginBottom: "6px" }}>
                       {item.title}
                     </div>
-                    <div
-                      style={{
-                        fontSize: "0.85rem",
-                        color: "var(--muted)",
-                        lineHeight: 1.6,
-                      }}
-                    >
+                    <div style={{ fontSize: "0.85rem", color: "var(--muted)", lineHeight: 1.6 }}>
                       {item.desc}
                     </div>
                   </div>
@@ -902,166 +1075,127 @@ export default function EduStreamApp() {
           {/* ══ LIBRARY VIEW ═══════════════════════════ */}
           {view === "library" && (
             <div>
-              <div className="stats-row">
-                <div className="stat-pill">
-                  <div className="stat-num">{db.length}</div>
-                  <div className="stat-desc">Videos totales</div>
-                </div>
-                <div className="stat-pill">
-                  <div className="stat-num">{categories}</div>
-                  <div className="stat-desc">Categorías</div>
-                </div>
-              </div>
-
-              <div className="library-header">
-                <div>
-                  <div className="section-label">Tu colección</div>
-                  <div
-                    className="section-title"
-                    style={{ marginBottom: 0 }}
-                  >
-                    Biblioteca de videos
-                  </div>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "10px",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div className="library-search">
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      style={{ color: "var(--muted)", flexShrink: 0 }}
-                    >
-                      <circle cx="11" cy="11" r="8" />
-                      <path d="M21 21l-4.35-4.35" />
-                    </svg>
-                    <input
-                      type="text"
-                      placeholder="Buscar video…"
-                      value={filter}
-                      onChange={(e) => setFilter(e.target.value)}
-                    />
-                  </div>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setView("add")}
-                  >
-                    + Añadir
-                  </button>
-                </div>
-              </div>
-
-              <div className="library-grid">
-                {filteredDb.length === 0 ? (
-                  <div
-                    className="empty-state"
-                    style={{ gridColumn: "1/-1" }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "3rem",
-                        marginBottom: "16px",
-                        opacity: 0.4,
-                      }}
-                    >
-                      🎬
+              {!user ? (
+                <div className="card">
+                  <div className="auth-prompt">
+                    <div className="auth-prompt-title">Inicia sesión para ver tu biblioteca</div>
+                    <div className="auth-prompt-desc">
+                      Tus videos guardados aparecen aquí una vez que hayas iniciado sesión.
                     </div>
-                    <div className="empty-text">
-                      {filter
-                        ? "No se encontraron resultados."
-                        : "No hay videos aún. ¡Añade el primero!"}
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => router.push("/auth/login")}
+                    >
+                      Iniciar sesión
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="stats-row">
+                    <div className="stat-pill">
+                      <div className="stat-num">{db.length}</div>
+                      <div className="stat-desc">Videos totales</div>
+                    </div>
+                    <div className="stat-pill">
+                      <div className="stat-num">{categories}</div>
+                      <div className="stat-desc">Categorías</div>
                     </div>
                   </div>
-                ) : (
-                  filteredDb.map((entry) => {
-                    const date = new Date(entry.added).toLocaleDateString(
-                      "es-ES",
-                      { day: "2-digit", month: "short", year: "numeric" }
-                    );
-                    return (
-                      <div
-                        className="video-card"
-                        key={entry.id}
-                        onClick={() => openPlayerEntry(entry)}
-                      >
-                        <div className="video-thumb">
-                          <Image
-                            src={thumbUrl(entry.ytId)}
-                            alt={entry.title}
-                            width={320}
-                            height={180}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                            crossOrigin="anonymous"
-                          />
-                          <div className="thumb-play">
-                            <div className="thumb-play-icon">&#9654;</div>
-                          </div>
-                        </div>
-                        <div className="video-card-body">
-                          <div className="video-card-title">{entry.title}</div>
-                          <div className="video-card-meta">
-                            <span>{date}</span>
-                            <span className="badge">{entry.category}</span>
-                          </div>
-                        </div>
-                        <div
-                          className="video-card-actions"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => copyLink(entry.id)}
-                          >
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <rect x="9" y="9" width="13" height="13" rx="2" />
-                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                            </svg>
-                            Copiar enlace
-                          </button>
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() => deleteVideo(entry.id)}
-                          >
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M19 6l-1 14H6L5 6" />
-                              <path d="M10 11v6M14 11v6M9 6V4h6v2" />
-                            </svg>
-                            Eliminar
-                          </button>
-                        </div>
+
+                  <div className="library-header">
+                    <div>
+                      <div className="section-label">Tu colección</div>
+                      <div className="section-title" style={{ marginBottom: 0 }}>
+                        Biblioteca de videos
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                      <div className="library-search">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: "var(--muted)", flexShrink: 0 }}>
+                          <circle cx="11" cy="11" r="8" />
+                          <path d="M21 21l-4.35-4.35" />
+                        </svg>
+                        <input
+                          type="text"
+                          placeholder="Buscar video…"
+                          value={filter}
+                          onChange={(e) => setFilter(e.target.value)}
+                        />
+                      </div>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setView("add")}>
+                        + Añadir
+                      </button>
+                    </div>
+                  </div>
+
+                  {dbLoading ? (
+                    <div className="empty-state">
+                      <div className="empty-text">Cargando biblioteca...</div>
+                    </div>
+                  ) : (
+                    <div className="library-grid">
+                      {filteredDb.length === 0 ? (
+                        <div className="empty-state" style={{ gridColumn: "1/-1" }}>
+                          <div style={{ fontSize: "3rem", marginBottom: "16px", opacity: 0.4 }}>
+                            🎬
+                          </div>
+                          <div className="empty-text">
+                            {filter ? "No se encontraron resultados." : "No hay videos aún. ¡Añade el primero!"}
+                          </div>
+                        </div>
+                      ) : (
+                        filteredDb.map((entry) => {
+                          const date = new Date(entry.added).toLocaleDateString("es-ES", {
+                            day: "2-digit", month: "short", year: "numeric",
+                          });
+                          return (
+                            <div className="video-card" key={entry.id} onClick={() => openPlayerEntry(entry)}>
+                              <div className="video-thumb">
+                                <Image
+                                  src={thumbUrl(entry.ytId)}
+                                  alt={entry.title}
+                                  width={320}
+                                  height={180}
+                                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                  crossOrigin="anonymous"
+                                />
+                                <div className="thumb-play">
+                                  <div className="thumb-play-icon">&#9654;</div>
+                                </div>
+                              </div>
+                              <div className="video-card-body">
+                                <div className="video-card-title">{entry.title}</div>
+                                <div className="video-card-meta">
+                                  <span>{date}</span>
+                                  <span className="badge">{entry.category}</span>
+                                </div>
+                              </div>
+                              <div className="video-card-actions" onClick={(e) => e.stopPropagation()}>
+                                <button className="btn btn-ghost btn-sm" onClick={() => copyLink(entry.id)}>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                  </svg>
+                                  Copiar enlace
+                                </button>
+                                <button className="btn btn-danger btn-sm" onClick={() => deleteVideo(entry.id)}>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14H6L5 6" />
+                                    <path d="M10 11v6M14 11v6M9 6V4h6v2" />
+                                  </svg>
+                                  Eliminar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -1069,14 +1203,7 @@ export default function EduStreamApp() {
           {view === "player" && currentEntry && (
             <div>
               <button className="player-back" onClick={backToLibrary}>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M19 12H5M12 5l-7 7 7 7" />
                 </svg>
                 Volver a la biblioteca
@@ -1088,73 +1215,33 @@ export default function EduStreamApp() {
                 <div className="player-overlay">
                   <div className="progress-bar-wrap">
                     <span className="time-label">{timeCurrent}</span>
-                    <div
-                      className="progress-track"
-                      onClick={seekFromBar}
-                    >
-                      <div
-                        className="progress-fill"
-                        style={{ width: `${progress}%` }}
-                      />
+                    <div className="progress-track" onClick={seekFromBar}>
+                      <div className="progress-fill" style={{ width: `${progress}%` }} />
                     </div>
                     <span className="time-label">{timeTotal}</span>
                   </div>
                   <div className="player-controls">
-                    <button
-                      className="ctrl-btn"
-                      onClick={() => skipTime(-15)}
-                      title="-15 segundos"
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                      >
-                        <path d="M1 4v6h6" />
-                        <path d="M3.51 15a9 9 0 1 0 .49-5" />
+                    <button className="ctrl-btn" onClick={() => skipTime(-15)} title="-15 segundos">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 .49-5" />
                       </svg>
-                      −15s
+                      -15s
                     </button>
-                    <button
-                      className="ctrl-btn play-pause"
-                      onClick={togglePlay}
-                    >
+                    <button className="ctrl-btn play-pause" onClick={togglePlay}>
                       {isPlaying ? "⏸ Pausa" : "⏵ Play"}
                     </button>
-                    <button
-                      className="ctrl-btn"
-                      onClick={() => skipTime(15)}
-                      title="+15 segundos"
-                    >
+                    <button className="ctrl-btn" onClick={() => skipTime(15)} title="+15 segundos">
                       +15s
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                      >
-                        <path d="M23 4v6h-6" />
-                        <path d="M20.49 15A9 9 0 1 1 20 10" />
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M23 4v6h-6" /><path d="M20.49 15A9 9 0 1 1 20 10" />
                       </svg>
                     </button>
                     <div className="ctrl-spacer" />
                     <button className="ctrl-btn" onClick={toggleMute}>
-                      {isMuted ? "🔇 Silencio" : "🔊 Sonido"}
+                      {isMuted ? "Silencio" : "Sonido"}
                     </button>
                     <button className="ctrl-btn" onClick={toggleFullscreen}>
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
                       </svg>
                       Pantalla completa
@@ -1162,12 +1249,8 @@ export default function EduStreamApp() {
                   </div>
                   <div className="player-info">
                     <div>
-                      <div className="now-playing-label">
-                        Reproduciendo ahora
-                      </div>
-                      <div className="now-playing-title">
-                        {currentEntry.title}
-                      </div>
+                      <div className="now-playing-label">Reproduciendo ahora</div>
+                      <div className="now-playing-title">{currentEntry.title}</div>
                     </div>
                     <div className="badge">{currentEntry.category}</div>
                   </div>
@@ -1176,44 +1259,23 @@ export default function EduStreamApp() {
 
               <div className="player-meta">
                 <div>
-                  <div
-                    className="section-label"
-                    style={{ marginTop: "24px" }}
-                  >
+                  <div className="section-label" style={{ marginTop: "24px" }}>
                     Detalles del video
                   </div>
-                  <div
-                    style={{
-                      fontFamily: "var(--font-head)",
-                      fontSize: "1.4rem",
-                      fontWeight: 700,
-                      marginBottom: "8px",
-                    }}
-                  >
+                  <div style={{ fontFamily: "var(--font-head)", fontSize: "1.4rem", fontWeight: 700, marginBottom: "8px" }}>
                     {currentEntry.title}
                   </div>
                   <div style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
                     Añadido el{" "}
                     {new Date(currentEntry.added).toLocaleDateString("es-ES", {
-                      weekday: "long",
-                      day: "2-digit",
-                      month: "long",
-                      year: "numeric",
+                      weekday: "long", day: "2-digit", month: "long", year: "numeric",
                     })}
                   </div>
                 </div>
-                <div
-                  className="player-share-card"
-                  style={{ minWidth: "260px" }}
-                >
-                  <div className="share-label">
-                    Compartir enlace de plataforma
-                  </div>
+                <div className="player-share-card" style={{ minWidth: "260px" }}>
+                  <div className="share-label">Compartir enlace de plataforma</div>
                   <div className="link-copy-row">
-                    <div
-                      className="link-url"
-                      style={{ fontSize: "0.8rem" }}
-                    >
+                    <div className="link-url" style={{ fontSize: "0.8rem" }}>
                       {platformLink(currentEntry.id)}
                     </div>
                     <button

@@ -85,19 +85,24 @@ export default function EmbedClient({ ytId, title }: { ytId: string; title: stri
   }, [createPlayer]);
 
   const togglePlay = () => {
-    if (!readyRef.current || !playerRef.current) return;
-    playing ? playerRef.current.pauseVideo() : playerRef.current.playVideo();
+    const p = playerRef.current;
+    if (!p) return;
+    try { playing ? p.pauseVideo() : p.playVideo(); } catch (_) {}
   };
 
   const skip = (sec: number) => {
-    if (!readyRef.current || !playerRef.current) return;
-    playerRef.current.seekTo(Math.max(0, playerRef.current.getCurrentTime() + sec), true);
+    const p = playerRef.current;
+    if (!p) return;
+    try { p.seekTo(Math.max(0, p.getCurrentTime() + sec), true); } catch (_) {}
   };
 
   const toggleMute = () => {
-    if (!readyRef.current || !playerRef.current) return;
-    if (muted) { playerRef.current.unMute(); setMuted(false); }
-    else        { playerRef.current.mute();   setMuted(true);  }
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      if (muted) { p.unMute(); setMuted(false); }
+      else        { p.mute();  setMuted(true);  }
+    } catch (_) {}
   };
 
   const toggleFs = () => {
@@ -108,10 +113,13 @@ export default function EmbedClient({ ytId, title }: { ytId: string; title: stri
   };
 
   const seek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!readyRef.current || !playerRef.current) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct  = (e.clientX - rect.left) / rect.width;
-    playerRef.current.seekTo(pct * playerRef.current.getDuration(), true);
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pct  = (e.clientX - rect.left) / rect.width;
+      p.seekTo(pct * p.getDuration(), true);
+    } catch (_) {}
   };
 
   return (

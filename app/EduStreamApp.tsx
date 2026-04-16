@@ -51,6 +51,21 @@ function formatTime(s: number) {
   return `${m}:${ss}`;
 }
 
+const STORAGE_KEY = "edustream_videos";
+
+function loadFromStorage(): VideoEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveToStorage(videos: VideoEntry[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(videos));
+}
+
 /* ─── Toast ────────────────────────────────────────────────── */
 interface ToastItem {
   id: number;
@@ -82,22 +97,6 @@ interface YTPlayerInstance {
   destroy: () => void;
 }
 
-const STORAGE_KEY = "edustream_videos";
-
-function loadFromStorage(): VideoEntry[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveToStorage(videos: VideoEntry[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(videos));
-}
-
 /* ══════════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════════ */
@@ -106,18 +105,15 @@ export default function EduStreamApp() {
 
   const [view, setView] = useState<View>("add");
 
-  /* ─── Add-video form ─────────────────────── */
   const [ytUrl, setYtUrl] = useState("");
   const [ytTitle, setYtTitle] = useState("");
   const [ytCategory, setYtCategory] = useState("");
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [lastEntry, setLastEntry] = useState<VideoEntry | null>(null);
 
-  /* ─── Library ────────────────────────────── */
   const [db, setDb] = useState<VideoEntry[]>([]);
   const [filter, setFilter] = useState("");
 
-  /* ─── Player ─────────────────────────────── */
   const [currentEntry, setCurrentEntry] = useState<VideoEntry | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -125,13 +121,11 @@ export default function EduStreamApp() {
   const [timeCurrent, setTimeCurrent] = useState("0:00");
   const [timeTotal, setTimeTotal] = useState("0:00");
 
-  /* ─── YouTube refs ───────────────────────── */
   const ytPlayerRef = useRef<YTPlayerInstance | null>(null);
   const ytReadyRef = useRef(false);
   const pendingVideoIdRef = useRef<string | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /* ─── Toasts ─────────────────────────────── */
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastCounter = useRef(0);
 
@@ -144,7 +138,7 @@ export default function EduStreamApp() {
     []
   );
 
-  /* ─── Load from localStorage ─────────────── */
+  /* ─── Load localStorage ──────────────────── */
   useEffect(() => {
     setDb(loadFromStorage());
   }, []);
@@ -173,14 +167,7 @@ export default function EduStreamApp() {
       if (!el) return;
       ytPlayerRef.current = new window.YT.Player("yt-player", {
         videoId: ytId,
-        playerVars: {
-          modestbranding: 1,
-          rel: 0,
-          showinfo: 0,
-          controls: 0,
-          fs: 0,
-          iv_load_policy: 3,
-        },
+        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3 },
         events: {
           onReady: (e: { target: YTPlayerInstance }) => {
             setIsPlaying(true);
@@ -204,7 +191,6 @@ export default function EduStreamApp() {
   /* ─── Load YouTube API ───────────────────── */
   useEffect(() => {
     if (typeof window === "undefined") return;
-
     window.onYouTubeIframeAPIReady = () => {
       ytReadyRef.current = true;
       if (pendingVideoIdRef.current) {
@@ -212,495 +198,347 @@ export default function EduStreamApp() {
         pendingVideoIdRef.current = null;
       }
     };
-
     if (!document.getElementById("yt-api-script")) {
       const script = document.createElement("script");
       script.id = "yt-api-script";
       script.src = "https://www.youtube.com/iframe_api";
       document.body.appendChild(script);
     }
-
-    return () => {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-    };
+    return () => { if (progressTimerRef.current) clearInterval(progressTimerRef.current); };
   }, [createPlayer]);
 
   /* ─── Deep link ?v= ──────────────────────── */
   useEffect(() => {
     const vid = searchParams.get("v");
     if (!vid) return;
-    const all = loadFromStorage();
-    const found = all.find((e) => e.id === vid);
-    if (found) {
-      setCurrentEntry(found);
-      setView("player");
-    }
-  }, [searchParams]);
+    const videos = loadFromStorage();
+    const found = videos.find((e) => e.id === vid);
+    if (found) openPlayerEntry(found);
+    else toast("Video no encontrado", "error");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  /* ─── Play a video ───────────────────────── */
-  const playEntry = useCallback(
-    (entry: VideoEntry) => {
-      setCurrentEntry(entry);
-      setProgress(0);
-      setTimeCurrent("0:00");
-      setTimeTotal("0:00");
-      setIsPlaying(false);
-
-      if (ytPlayerRef.current) {
-        try { ytPlayerRef.current.destroy(); } catch {}
-        ytPlayerRef.current = null;
-      }
-
-      setView("player");
-
-      setTimeout(() => {
-        if (ytReadyRef.current) {
-          createPlayer(entry.ytId);
-        } else {
-          pendingVideoIdRef.current = entry.ytId;
-        }
-      }, 100);
-    },
-    [createPlayer]
-  );
+  /* ─── Open player ────────────────────────── */
+  function openPlayerEntry(entry: VideoEntry) {
+    setCurrentEntry(entry);
+    setView("player");
+    if (!ytReadyRef.current) { pendingVideoIdRef.current = entry.ytId; return; }
+    if (!ytPlayerRef.current) { setTimeout(() => createPlayer(entry.ytId), 50); }
+    else { ytPlayerRef.current.loadVideoById(entry.ytId); setIsPlaying(true); startProgressTimer(); }
+  }
 
   /* ─── Add video ──────────────────────────── */
-  const handleAdd = useCallback(() => {
+  function addVideo() {
+    if (!ytUrl.trim()) { toast("Introduce un enlace de YouTube", "error"); return; }
     const ytId = extractYouTubeId(ytUrl.trim());
-    if (!ytId) { toast("URL de YouTube no válida", "error"); return; }
-    if (!ytTitle.trim()) { toast("Escribe un título", "error"); return; }
-
-    const id = genId();
+    if (!ytId) { toast("Enlace de YouTube no válido", "error"); return; }
+    const current = loadFromStorage();
+    if (current.some((e) => e.ytId === ytId)) { toast("Este video ya existe en tu biblioteca", "error"); return; }
     const entry: VideoEntry = {
-      id,
-      ytId,
-      title: ytTitle.trim(),
+      id: genId(), ytId,
+      title: ytTitle.trim() || "Video sin título",
       category: ytCategory.trim() || "Sin categoría",
       added: new Date().toISOString(),
     };
-
-    const updated = [entry, ...db];
-    setDb(updated);
+    const updated = [entry, ...current];
     saveToStorage(updated);
-
-    const link = platformLink(id);
+    setDb(updated);
+    const link = platformLink(entry.id);
     setGeneratedLink(link);
     setLastEntry(entry);
-    setYtUrl("");
-    setYtTitle("");
-    setYtCategory("");
     toast("Video añadido correctamente");
-  }, [ytUrl, ytTitle, ytCategory, db, toast]);
+  }
 
-  /* ─── Delete video ───────────────────────── */
-  const handleDelete = useCallback(
-    (id: string) => {
-      const updated = db.filter((v) => v.id !== id);
-      setDb(updated);
-      saveToStorage(updated);
-      toast("Video eliminado");
-    },
-    [db, toast]
-  );
+  function clearForm() {
+    setYtUrl(""); setYtTitle(""); setYtCategory("");
+    setGeneratedLink(null); setLastEntry(null);
+  }
 
-  /* ─── Copy link ──────────────────────────── */
-  const copyLink = useCallback(
-    (link: string) => {
-      navigator.clipboard.writeText(link).then(
-        () => toast("Enlace copiado"),
-        () => toast("No se pudo copiar", "error")
-      );
-    },
-    [toast]
-  );
+  function deleteVideo(id: string) {
+    const updated = db.filter((e) => e.id !== id);
+    saveToStorage(updated); setDb(updated);
+    toast("Video eliminado");
+  }
+
+  function copyLink(entryId: string) {
+    navigator.clipboard.writeText(platformLink(entryId))
+      .then(() => toast("Enlace copiado al portapapeles"));
+  }
 
   /* ─── Player controls ────────────────────── */
-  const togglePlay = useCallback(() => {
-    const p = ytPlayerRef.current;
-    if (!p) return;
-    if (isPlaying) { p.pauseVideo(); setIsPlaying(false); }
-    else { p.playVideo(); setIsPlaying(true); startProgressTimer(); }
-  }, [isPlaying, startProgressTimer]);
-
-  const toggleMute = useCallback(() => {
-    const p = ytPlayerRef.current;
-    if (!p) return;
-    if (isMuted) { p.unMute(); setIsMuted(false); }
-    else { p.mute(); setIsMuted(true); }
-  }, [isMuted]);
-
-  const skip = useCallback((secs: number) => {
-    const p = ytPlayerRef.current;
-    if (!p) return;
-    p.seekTo(p.getCurrentTime() + secs, true);
-  }, []);
-
-  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const p = ytPlayerRef.current;
-    if (!p) return;
+  function togglePlay() {
+    const p = ytPlayerRef.current; if (!p) return;
+    if (p.getPlayerState() === window.YT.PlayerState.PLAYING) { p.pauseVideo(); setIsPlaying(false); }
+    else { p.playVideo(); setIsPlaying(true); }
+  }
+  function skipTime(secs: number) {
+    const p = ytPlayerRef.current; if (!p) return;
+    p.seekTo(Math.max(0, p.getCurrentTime() + secs), true);
+  }
+  function toggleMute() {
+    const p = ytPlayerRef.current; if (!p) return;
+    setIsMuted((prev) => { const next = !prev; next ? p.mute() : p.unMute(); return next; });
+  }
+  function toggleFullscreen() {
+    const el = document.getElementById("player-wrap"); if (!el) return;
+    if (!document.fullscreenElement) el.requestFullscreen().catch((err) => toast(err.message, "error"));
+    else document.exitFullscreen();
+  }
+  function seekFromBar(e: React.MouseEvent<HTMLDivElement>) {
+    const p = ytPlayerRef.current; if (!p || typeof p.getDuration !== "function") return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    p.seekTo(ratio * p.getDuration(), true);
-  }, []);
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    p.seekTo(p.getDuration() * pct, true);
+  }
+  function backToLibrary() {
+    const p = ytPlayerRef.current;
+    if (p && typeof p.pauseVideo === "function") p.pauseVideo();
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    setIsPlaying(false); setView("library");
+  }
 
-  const enterFullscreen = useCallback(() => {
-    const el = document.getElementById("player-wrapper");
-    if (el?.requestFullscreen) el.requestFullscreen();
-  }, []);
+  const filteredDb = filter
+    ? db.filter((e) => e.title.toLowerCase().includes(filter.toLowerCase()) || e.category.toLowerCase().includes(filter.toLowerCase()))
+    : db;
+  const categories = new Set(db.map((e) => e.category)).size;
 
-  const filtered = db.filter(
-    (v) =>
-      v.title.toLowerCase().includes(filter.toLowerCase()) ||
-      v.category.toLowerCase().includes(filter.toLowerCase())
-  );
-
-  /* ══ RENDER ══════════════════════════════════════════════════ */
+  /* ══════════════════════════════════════════
+     RENDER
+  ══════════════════════════════════════════ */
   return (
     <>
       <style>{`
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0a0a0a; color: #e5e5e5; font-family: 'Inter', system-ui, sans-serif; }
-        .app { min-height: 100vh; display: flex; flex-direction: column; }
-
-        /* ── Header ── */
-        .header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 14px 24px; background: #111; border-bottom: 1px solid #222;
-          position: sticky; top: 0; z-index: 50;
+        *{box-sizing:border-box;margin:0;padding:0}
+        :root{
+          --bg:#0a0a0f;--surface:#111118;--card:#16161f;
+          --border:rgba(255,255,255,0.07);--text:#f0f0f0;--muted:#666680;
+          --accent:#e8ff47;--danger:#ff5c5c;
+          --radius:12px;--radius-lg:18px;
+          --glow:0 0 24px rgba(232,255,71,0.25);
+          --font:Inter,sans-serif;
         }
-        .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-        .logo-icon { width: 32px; height: 32px; background: #e50914; border-radius: 6px;
-          display: flex; align-items: center; justify-content: center; }
-        .logo-text { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
-        .logo-text span { color: #e50914; }
-        .nav { display: flex; gap: 4px; }
-        .nav-btn {
-          padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer;
-          font-size: 14px; font-weight: 500; transition: all .15s;
-          background: transparent; color: #aaa;
+        body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh}
+        header{
+          display:flex;align-items:center;justify-content:space-between;
+          padding:20px 40px;border-bottom:1px solid var(--border);
+          position:sticky;top:0;background:rgba(10,10,15,0.85);
+          backdrop-filter:blur(20px);z-index:100;
         }
-        .nav-btn:hover { background: #1e1e1e; color: #fff; }
-        .nav-btn.active { background: #e50914; color: #fff; }
-
-        /* ── Main ── */
-        .main { flex: 1; padding: 32px 24px; max-width: 900px; margin: 0 auto; width: 100%; }
-
-        /* ── Card ── */
-        .card {
-          background: #111; border: 1px solid #222; border-radius: 12px;
-          padding: 28px; margin-bottom: 24px;
-        }
-        .card-title { font-size: 18px; font-weight: 600; color: #fff; margin-bottom: 20px; }
-
-        /* ── Form ── */
-        .form-group { margin-bottom: 16px; }
-        .form-label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; font-weight: 500; }
-        .form-input {
-          width: 100%; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 8px;
-          padding: 10px 14px; color: #e5e5e5; font-size: 14px; outline: none;
-          transition: border-color .15s;
-        }
-        .form-input:focus { border-color: #e50914; }
-        .form-input::placeholder { color: #555; }
-        .btn {
-          padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer;
-          font-size: 14px; font-weight: 600; transition: all .15s;
-        }
-        .btn-primary { background: #e50914; color: #fff; }
-        .btn-primary:hover { background: #c4060f; }
-        .btn-secondary { background: #1e1e1e; color: #ccc; }
-        .btn-secondary:hover { background: #2a2a2a; color: #fff; }
-        .btn-danger { background: transparent; color: #e50914; border: 1px solid #e50914; }
-        .btn-danger:hover { background: #e50914; color: #fff; }
-
-        /* ── Generated link ── */
-        .link-box {
-          background: #0d1f0f; border: 1px solid #1a4a1e; border-radius: 10px;
-          padding: 20px; margin-top: 20px;
-        }
-        .link-box h3 { font-size: 14px; color: #4caf50; font-weight: 600; margin-bottom: 12px; }
-        .link-copy-row { display: flex; gap: 10px; align-items: center; }
-        .link-text {
-          flex: 1; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 6px;
-          padding: 8px 12px; color: #7ee87a; font-size: 13px; font-family: monospace;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-
-        /* ── Library ── */
-        .search-bar {
-          width: 100%; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 8px;
-          padding: 10px 14px; color: #e5e5e5; font-size: 14px; outline: none;
-          margin-bottom: 20px; transition: border-color .15s;
-        }
-        .search-bar:focus { border-color: #e50914; }
-        .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-        .video-card {
-          background: #0d0d0d; border: 1px solid #1e1e1e; border-radius: 10px;
-          overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s;
-        }
-        .video-card:hover { border-color: #e50914; transform: translateY(-2px); }
-        .thumb-wrap { position: relative; aspect-ratio: 16/9; background: #111; }
-        .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; }
-        .play-overlay {
-          position: absolute; inset: 0; background: rgba(0,0,0,.4);
-          display: flex; align-items: center; justify-content: center;
-          opacity: 0; transition: opacity .15s;
-        }
-        .video-card:hover .play-overlay { opacity: 1; }
-        .play-circle {
-          width: 48px; height: 48px; background: #e50914; border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .video-info { padding: 12px; }
-        .video-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .video-cat { font-size: 12px; color: #666; margin-bottom: 10px; }
-        .video-actions { display: flex; gap: 8px; }
-        .icon-btn {
-          background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px;
-          padding: 5px 10px; cursor: pointer; font-size: 12px; color: #888;
-          transition: all .15s; display: flex; align-items: center; gap: 4px;
-        }
-        .icon-btn:hover { background: #252525; color: #fff; }
-        .icon-btn.del:hover { border-color: #e50914; color: #e50914; }
-
-        /* ── Player ── */
-        .player-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
-        #yt-player { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-        .player-aspect { aspect-ratio: 16/9; position: relative; }
-        .player-overlay {
-          position: absolute; inset: 0; display: flex; flex-direction: column;
-          justify-content: flex-end; background: linear-gradient(transparent 40%, rgba(0,0,0,.85));
-          z-index: 10;
-        }
-        .controls { padding: 16px; }
-        .progress-bar {
-          width: 100%; height: 4px; background: rgba(255,255,255,.2);
-          border-radius: 2px; cursor: pointer; margin-bottom: 12px; position: relative;
-        }
-        .progress-fill { height: 100%; background: #e50914; border-radius: 2px; transition: width .1s; }
-        .controls-row { display: flex; align-items: center; gap: 12px; }
-        .ctrl-btn {
-          background: none; border: none; cursor: pointer; color: #fff;
-          width: 36px; height: 36px; border-radius: 50%; display: flex;
-          align-items: center; justify-content: center; transition: background .15s; padding: 0;
-        }
-        .ctrl-btn:hover { background: rgba(255,255,255,.15); }
-        .ctrl-btn svg { width: 20px; height: 20px; fill: currentColor; }
-        .time-display { font-size: 13px; color: rgba(255,255,255,.7); font-variant-numeric: tabular-nums; margin-left: auto; }
-
-        /* ── Toasts ── */
-        .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
-        .toast {
-          padding: 12px 18px; border-radius: 8px; font-size: 14px; font-weight: 500;
-          color: #fff; animation: slideIn .2s ease;
-          box-shadow: 0 4px 20px rgba(0,0,0,.4);
-        }
-        .toast.success { background: #1a3a1e; border: 1px solid #2d6a35; }
-        .toast.error { background: #3a1a1a; border: 1px solid #6a2d2d; }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-
-        .empty-state { text-align: center; padding: 60px 20px; color: #555; }
-        .empty-state h3 { font-size: 18px; color: #666; margin-bottom: 8px; }
+        .logo{font-weight:800;font-size:1.4rem;letter-spacing:-0.5px;display:flex;align-items:center;gap:8px}
+        .logo span{color:var(--accent)}
+        .logo-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 2s ease-in-out infinite}
+        @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.6}}
+        .nav-tabs{display:flex;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:4px}
+        .nav-tab{padding:8px 20px;border-radius:7px;border:none;background:transparent;color:var(--muted);font-family:var(--font);font-size:.9rem;font-weight:500;cursor:pointer;transition:all .2s}
+        .nav-tab.active{background:var(--card);color:var(--text)}
+        .nav-tab:hover:not(.active){color:var(--text)}
+        main{max-width:1100px;margin:0 auto;padding:40px 24px}
+        .section-label{font-size:.72rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+        .section-title{font-size:2rem;font-weight:700;line-height:1.15;margin-bottom:32px}
+        .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;position:relative;overflow:hidden}
+        .card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.4}
+        .input-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+        @media(max-width:640px){.input-row{grid-template-columns:1fr}}
+        .input-group{display:flex;flex-direction:column;gap:8px}
+        .input-group.full{grid-column:1/-1}
+        label{font-size:.8rem;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+        input[type=text]{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;font-family:var(--font);font-size:.95rem;color:var(--text);transition:all .2s;outline:none;width:100%}
+        input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(232,255,71,.08)}
+        input[type=text]::placeholder{color:var(--muted)}
+        .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 24px;border-radius:var(--radius);border:none;font-family:var(--font);font-weight:600;font-size:.9rem;cursor:pointer;transition:all .2s;white-space:nowrap}
+        .btn-primary{background:var(--accent);color:#0a0a0f}
+        .btn-primary:hover{transform:translateY(-1px);box-shadow:var(--glow);filter:brightness(1.05)}
+        .btn-ghost{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+        .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+        .btn-danger{background:rgba(255,92,92,.1);color:var(--danger);border:1px solid rgba(255,92,92,.2)}
+        .btn-danger:hover{background:rgba(255,92,92,.2)}
+        .btn-sm{padding:8px 14px;font-size:.8rem;border-radius:8px}
+        .actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:24px}
+        .link-result{margin-top:24px;background:var(--surface);border:1px solid var(--accent);border-radius:var(--radius);padding:16px 20px;animation:slideIn .3s ease}
+        @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        .link-result-label{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+        .link-result-url{font-family:monospace;font-size:.88rem;color:var(--text);word-break:break-all}
+        .stats-bar{display:flex;gap:24px;margin-bottom:32px;flex-wrap:wrap}
+        .stat{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 24px;flex:1;min-width:120px}
+        .stat-value{font-size:2rem;font-weight:800;color:var(--accent);line-height:1}
+        .stat-label{font-size:.78rem;color:var(--muted);margin-top:4px}
+        .search-bar{margin-bottom:24px}
+        .search-bar input[type=text]{max-width:400px}
+        .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+        .video-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;transition:all .25s;cursor:pointer}
+        .video-card:hover{border-color:rgba(232,255,71,.25);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,.4)}
+        .thumb-wrap{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--surface)}
+        .thumb-wrap img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .3s}
+        .video-card:hover .thumb-wrap img{transform:scale(1.04)}
+        .play-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);opacity:0;transition:opacity .2s}
+        .video-card:hover .play-overlay{opacity:1}
+        .play-icon{width:44px;height:44px;border-radius:50%;background:var(--accent);color:#0a0a0f;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+        .video-info{padding:16px}
+        .video-title{font-weight:600;font-size:.92rem;margin-bottom:4px;line-height:1.4}
+        .video-cat{font-size:.78rem;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
+        .badge{display:inline-block;padding:2px 8px;background:rgba(232,255,71,.1);color:var(--accent);border-radius:6px;font-size:.72rem;font-weight:600;border:1px solid rgba(232,255,71,.2)}
+        .card-actions{padding:0 16px 16px;display:flex;gap:8px}
+        .player-page{max-width:900px;margin:0 auto;padding:40px 24px}
+        .back-btn{display:inline-flex;align-items:center;gap:8px;background:none;border:none;color:var(--muted);font-family:var(--font);font-size:.88rem;cursor:pointer;padding:0;margin-bottom:24px;transition:color .2s}
+        .back-btn:hover{color:var(--text)}
+        #player-wrap{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.7)}
+        #yt-player{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+        .player-overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;background:linear-gradient(transparent 40%,rgba(0,0,0,.85) 100%)}
+        .progress-area{padding:0 20px;cursor:pointer}
+        .progress-bar{height:4px;background:rgba(255,255,255,.15);border-radius:2px;overflow:hidden;transition:height .15s}
+        .progress-area:hover .progress-bar{height:6px}
+        .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .4s linear}
+        .time-row{display:flex;justify-content:space-between;padding:4px 0 10px;font-size:.78rem;color:rgba(255,255,255,.6)}
+        .controls{display:flex;align-items:center;justify-content:center;gap:16px;padding:0 20px 20px}
+        .ctrl-btn{background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.9rem;transition:all .2s}
+        .ctrl-btn:hover{background:rgba(255,255,255,.2)}
+        .ctrl-btn.play-pause{width:52px;height:52px;background:var(--accent);color:#0a0a0f;font-size:1.1rem}
+        .ctrl-btn.play-pause:hover{filter:brightness(1.1)}
+        .ctrl-btn.active{color:var(--accent)}
+        .player-title{font-weight:700;font-size:1.3rem;margin:20px 0 8px}
+        .player-cat{color:var(--muted);font-size:.88rem}
+        .toast-container{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:9999}
+        .toast{padding:12px 20px;border-radius:10px;font-size:.88rem;font-weight:500;animation:toastIn .3s ease;max-width:320px}
+        @keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+        .toast.success{background:#1a2a0a;border:1px solid rgba(232,255,71,.3);color:var(--accent)}
+        .toast.error{background:#2a0a0a;border:1px solid rgba(255,92,92,.3);color:var(--danger)}
+        .empty-state{text-align:center;padding:80px 32px}
+        .empty-icon{font-size:3rem;margin-bottom:16px;opacity:.3}
+        .empty-title{font-size:1.2rem;font-weight:700;margin-bottom:8px}
+        .empty-desc{color:var(--muted);font-size:.88rem;line-height:1.6}
       `}</style>
 
-      <div className="app">
-        {/* ── HEADER ── */}
-        <header className="header">
+      <div>
+        {/* ── Header ── */}
+        <header>
           <div className="logo">
-            <div className="logo-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
-            <span className="logo-text">Edu<span>Stream</span></span>
+            <div className="logo-dot" />
+            Edu<span>Stream</span>
           </div>
-          <nav className="nav">
-            <button className={`nav-btn${view === "add" ? " active" : ""}`} onClick={() => setView("add")}>
-              + Añadir
-            </button>
-            <button className={`nav-btn${view === "library" ? " active" : ""}`} onClick={() => setView("library")}>
-              Biblioteca ({db.length})
-            </button>
-            {currentEntry && (
-              <button className={`nav-btn${view === "player" ? " active" : ""}`} onClick={() => setView("player")}>
-                Reproduciendo
+          {view !== "player" && (
+            <nav className="nav-tabs" aria-label="Navegación">
+              <button className={`nav-tab${view === "add" ? " active" : ""}`} onClick={() => setView("add")}>
+                + Añadir
               </button>
-            )}
-          </nav>
+              <button className={`nav-tab${view === "library" ? " active" : ""}`} onClick={() => setView("library")}>
+                Biblioteca
+              </button>
+            </nav>
+          )}
         </header>
 
-        <main className="main">
-          {/* ── ADD VIDEO ── */}
-          {view === "add" && (
+        {/* ── ADD VIEW ── */}
+        {view === "add" && (
+          <main>
+            <div className="section-label">Nueva entrada</div>
+            <h1 className="section-title">Añadir Video</h1>
             <div className="card">
-              <h2 className="card-title">Añadir nuevo video</h2>
-              <div className="form-group">
-                <label className="form-label">URL de YouTube</label>
-                <input
-                  className="form-input"
-                  type="url"
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  value={ytUrl}
-                  onChange={(e) => setYtUrl(e.target.value)}
-                />
+              <div className="input-row">
+                <div className="input-group full">
+                  <label htmlFor="yt-url">Enlace de YouTube</label>
+                  <input id="yt-url" type="text" placeholder="https://youtube.com/watch?v=..." value={ytUrl} onChange={(e) => setYtUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addVideo()} />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="yt-title">Título (opcional)</label>
+                  <input id="yt-title" type="text" placeholder="Nombre del video" value={ytTitle} onChange={(e) => setYtTitle(e.target.value)} />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="yt-cat">Categoría (opcional)</label>
+                  <input id="yt-cat" type="text" placeholder="Ej: Matemáticas, Historia..." value={ytCategory} onChange={(e) => setYtCategory(e.target.value)} />
+                </div>
               </div>
-              <div className="form-group">
-                <label className="form-label">Título</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  placeholder="Título del video"
-                  value={ytTitle}
-                  onChange={(e) => setYtTitle(e.target.value)}
-                />
+              <div className="actions">
+                <button className="btn btn-primary" onClick={addVideo}>Generar enlace</button>
+                <button className="btn btn-ghost" onClick={clearForm}>Limpiar</button>
               </div>
-              <div className="form-group">
-                <label className="form-label">Categoría (opcional)</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  placeholder="Ej: Matemáticas, Ciencias..."
-                  value={ytCategory}
-                  onChange={(e) => setYtCategory(e.target.value)}
-                />
-              </div>
-              <button className="btn btn-primary" onClick={handleAdd}>
-                Generar enlace
-              </button>
-
               {generatedLink && lastEntry && (
-                <div className="link-box">
-                  <h3>Enlace generado para &quot;{lastEntry.title}&quot;</h3>
-                  <div className="link-copy-row">
-                    <div className="link-text">{generatedLink}</div>
-                    <button className="btn btn-secondary" onClick={() => copyLink(generatedLink)}>
-                      Copiar
-                    </button>
-                    <button className="btn btn-primary" onClick={() => { setCurrentEntry(lastEntry); setView("player"); setTimeout(() => { if (ytReadyRef.current) createPlayer(lastEntry.ytId); else pendingVideoIdRef.current = lastEntry.ytId; }, 100); }}>
-                      Reproducir
-                    </button>
+                <div className="link-result">
+                  <div className="link-result-label">Enlace generado</div>
+                  <div className="link-result-url">{generatedLink}</div>
+                  <div className="actions" style={{ marginTop: "16px" }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => copyLink(lastEntry.id)}>Copiar enlace</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => openPlayerEntry(lastEntry)}>Reproducir</button>
+                    <button className="btn btn-ghost btn-sm" onClick={clearForm}>Nuevo video</button>
                   </div>
                 </div>
               )}
             </div>
-          )}
+          </main>
+        )}
 
-          {/* ── LIBRARY ── */}
-          {view === "library" && (
-            <div>
-              <input
-                className="search-bar"
-                placeholder="Buscar por título o categoría..."
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
-              {filtered.length === 0 ? (
-                <div className="empty-state">
-                  <h3>{db.length === 0 ? "Tu biblioteca está vacía" : "Sin resultados"}</h3>
-                  <p>{db.length === 0 ? "Añade tu primer video desde la pestaña + Añadir" : "Prueba con otro término de búsqueda"}</p>
-                </div>
-              ) : (
-                <div className="video-grid">
-                  {filtered.map((v) => (
-                    <div key={v.id} className="video-card">
-                      <div className="thumb-wrap" onClick={() => playEntry(v)}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={thumbUrl(v.ytId)} alt={v.title} />
-                        <div className="play-overlay">
-                          <div className="play-circle">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="video-info">
-                        <div className="video-title">{v.title}</div>
-                        <div className="video-cat">{v.category}</div>
-                        <div className="video-actions">
-                          <button className="icon-btn" onClick={() => copyLink(platformLink(v.id))}>
-                            Copiar enlace
-                          </button>
-                          <button className="icon-btn del" onClick={() => handleDelete(v.id)}>
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+        {/* ── LIBRARY VIEW ── */}
+        {view === "library" && (
+          <main>
+            <div className="section-label">Contenido guardado</div>
+            <h1 className="section-title">Biblioteca</h1>
+            <div className="stats-bar">
+              <div className="stat"><div className="stat-value">{db.length}</div><div className="stat-label">Videos</div></div>
+              <div className="stat"><div className="stat-value">{categories}</div><div className="stat-label">Categorías</div></div>
             </div>
-          )}
-
-          {/* ── PLAYER ── */}
-          {view === "player" && currentEntry && (
-            <div>
-              <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-                <button className="btn btn-secondary" onClick={() => setView("library")}>
-                  ← Volver
-                </button>
-                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#fff" }}>{currentEntry.title}</h2>
+            <div className="search-bar">
+              <input type="text" placeholder="Buscar por título o categoría..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+            </div>
+            {db.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">📚</div>
+                <div className="empty-title">La biblioteca está vacía</div>
+                <div className="empty-desc">Añade tu primer video desde la pestaña &quot;Añadir&quot;.</div>
               </div>
-              <div className="player-container" id="player-wrapper">
-                <div className="player-aspect">
-                  <div id="yt-player" />
-                  <div className="player-overlay">
-                    <div className="controls">
-                      <div className="progress-bar" onClick={handleSeek}>
-                        <div className="progress-fill" style={{ width: `${progress}%` }} />
-                      </div>
-                      <div className="controls-row">
-                        {/* Skip back */}
-                        <button className="ctrl-btn" onClick={() => skip(-15)} title="-15s">
-                          <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="8.5" y="16" fontSize="5" fill="currentColor" fontWeight="bold">15</text></svg>
-                        </button>
-                        {/* Play/Pause */}
-                        <button className="ctrl-btn" onClick={togglePlay}>
-                          {isPlaying ? (
-                            <svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                          ) : (
-                            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                          )}
-                        </button>
-                        {/* Skip forward */}
-                        <button className="ctrl-btn" onClick={() => skip(15)} title="+15s">
-                          <svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/><text x="8.5" y="16" fontSize="5" fill="currentColor" fontWeight="bold">15</text></svg>
-                        </button>
-                        {/* Mute */}
-                        <button className="ctrl-btn" onClick={toggleMute}>
-                          {isMuted ? (
-                            <svg viewBox="0 0 24 24"><path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
-                          ) : (
-                            <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
-                          )}
-                        </button>
-                        {/* Fullscreen */}
-                        <button className="ctrl-btn" onClick={enterFullscreen}>
-                          <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-                        </button>
-                        <span className="time-display">{timeCurrent} / {timeTotal}</span>
-                      </div>
+            ) : (
+              <div className="grid">
+                {filteredDb.map((entry) => (
+                  <div key={entry.id} className="video-card">
+                    <div className="thumb-wrap" onClick={() => openPlayerEntry(entry)}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={thumbUrl(entry.ytId)} alt={entry.title} loading="lazy" />
+                      <div className="play-overlay"><div className="play-icon">&#9654;</div></div>
+                    </div>
+                    <div className="video-info" onClick={() => openPlayerEntry(entry)}>
+                      <div className="video-title">{entry.title}</div>
+                      <div className="video-cat"><span>{entry.category}</span><span className="badge">{entry.category}</span></div>
+                    </div>
+                    <div className="card-actions">
+                      <button className="btn btn-ghost btn-sm" onClick={() => copyLink(entry.id)}>Copiar enlace</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => deleteVideo(entry.id)}>Eliminar</button>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </main>
+        )}
+
+        {/* ── PLAYER VIEW ── */}
+        {view === "player" && currentEntry && (
+          <div className="player-page">
+            <button className="back-btn" onClick={backToLibrary}>&#8592; Volver a la biblioteca</button>
+            <div id="player-wrap">
+              <div id="yt-player" />
+              <div className="player-overlay">
+                <div className="progress-area" onClick={seekFromBar}>
+                  <div className="progress-bar"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
+                  <div className="time-row"><span>{timeCurrent}</span><span>{timeTotal}</span></div>
+                </div>
+                <div className="controls">
+                  <button className="ctrl-btn" onClick={() => skipTime(-15)} title="Retroceder 15s">&#8630;</button>
+                  <button className="ctrl-btn play-pause" onClick={togglePlay}>{isPlaying ? "⏸" : "▶"}</button>
+                  <button className="ctrl-btn" onClick={() => skipTime(15)} title="Adelantar 15s">&#8631;</button>
+                  <button className={`ctrl-btn${isMuted ? " active" : ""}`} onClick={toggleMute}>{isMuted ? "🔇" : "🔊"}</button>
+                  <button className="ctrl-btn" onClick={toggleFullscreen}>&#x26F6;</button>
                 </div>
               </div>
-              <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-                <button className="btn btn-secondary" onClick={() => copyLink(platformLink(currentEntry.id))}>
-                  Copiar enlace
-                </button>
-              </div>
             </div>
-          )}
-        </main>
-      </div>
+            <div className="player-title">{currentEntry.title}</div>
+            <div className="player-cat">{currentEntry.category}</div>
+          </div>
+        )}
 
-      {/* ── TOASTS ── */}
-      <div className="toast-container">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>
-        ))}
+        {/* ── Toasts ── */}
+        <div className="toast-container" aria-live="polite">
+          {toasts.map((t) => (
+            <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>
+          ))}
+        </div>
       </div>
     </>
   );

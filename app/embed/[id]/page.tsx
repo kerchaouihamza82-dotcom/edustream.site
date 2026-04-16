@@ -12,7 +12,6 @@ export default async function EmbedPage({ params }: { params: Promise<{ id: stri
     .from("videos")
     .select("id, youtube_id, title")
     .eq("id", id)
-    .eq("is_active", true)
     .single();
 
   if (!video) notFound();

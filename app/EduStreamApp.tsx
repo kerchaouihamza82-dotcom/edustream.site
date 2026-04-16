@@ -161,7 +161,8 @@ export default function EduStreamApp() {
         videoId: ytId,
         playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3 },
         events: {
-          onReady: (e: { target: YTPlayerInstance }) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onReady: (e: { target: any }) => {
             setIsPlaying(true);
             e.target.playVideo();
             startProgressTimer();
@@ -209,7 +210,7 @@ export default function EduStreamApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db]);
 
-  /* ─── Open player ────────────────────────── */
+  /* ─── Open player ──���─────────────────────── */
   function openPlayerEntry(entry: VideoEntry) {
     setCurrentEntry(entry);
     setView("player");

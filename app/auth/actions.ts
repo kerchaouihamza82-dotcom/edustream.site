@@ -20,7 +20,7 @@ export async function signIn(email: string, password: string) {
       return { error: "Credenciales incorrectas. Verifica tu email y contraseña." };
     }
     if (error.message.includes("Email not confirmed")) {
-      return { error: "Confirma tu email antes de iniciar sesión." };
+      return { error: "Revisa tu bandeja de entrada y confirma tu email para poder iniciar sesión." };
     }
     return { error: error.message };
   }

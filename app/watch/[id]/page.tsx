@@ -89,14 +89,8 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
         <a className="brand" href="https://edustream.site">EduStream</a>
 
         <div id="player-wrap">
-          {/* YouTube IFrame — pointer-events:none bloquea todos los controles nativos */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <iframe
-            id="yt-player"
-            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&controls=0&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1&fs=0&enablejsapi=1&origin=https://edustream.site`}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            title={title}
-          />
+          {/* div vacío — la YouTube IFrame API lo reemplaza con el iframe controlado */}
+          <div id="yt-player" style={{ position:"absolute", inset:0, width:"100%", height:"100%", pointerEvents:"none" }} />
 
           {/* Overlay con controles personalizados */}
           <div className="overlay" id="player-overlay">
@@ -129,16 +123,19 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
         <p className="footer">Powered by <a href="https://edustream.site">EduStream</a></p>
       </div>
 
+      {/* Load YouTube IFrame API first, then define the callback */}
+      <script src="https://www.youtube.com/iframe_api" />
       <script dangerouslySetInnerHTML={{ __html: `
         (function() {
+          var VIDEO_ID = ${JSON.stringify(ytId)};
           var player, ready = false, playing = false, muted = false;
           var progFill = document.getElementById('prog-fill');
-          var tCur = document.getElementById('t-cur');
-          var tTot = document.getElementById('t-tot');
+          var tCur    = document.getElementById('t-cur');
+          var tTot    = document.getElementById('t-tot');
           var btnPlay = document.getElementById('btn-play');
           var btnMute = document.getElementById('btn-mute');
           var progTrack = document.getElementById('prog-track');
-          var wrap = document.getElementById('player-wrap');
+          var wrap    = document.getElementById('player-wrap');
 
           function fmt(s) {
             s = Math.floor(s || 0);
@@ -146,8 +143,10 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
             return m + ':' + (sec < 10 ? '0' : '') + sec;
           }
 
-          window.onYouTubeIframeAPIReady = function() {
+          function initPlayer() {
             player = new YT.Player('yt-player', {
+              videoId: VIDEO_ID,
+              playerVars: { autoplay: 1, controls: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, disablekb: 1, fs: 0, playsinline: 1 },
               events: {
                 onReady: function() {
                   ready = true;
@@ -160,9 +159,16 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
                 }
               }
             });
-          };
+          }
 
-          document.getElementById('btn-play').addEventListener('click', function() {
+          // If API already loaded, init immediately; otherwise wait for callback
+          if (window.YT && window.YT.Player) {
+            initPlayer();
+          } else {
+            window.onYouTubeIframeAPIReady = initPlayer;
+          }
+
+          btnPlay.addEventListener('click', function() {
             if (!ready) return;
             playing ? player.pauseVideo() : player.playVideo();
           });
@@ -177,7 +183,7 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
             player.seekTo(player.getCurrentTime() + 15, true);
           });
 
-          document.getElementById('btn-mute').addEventListener('click', function() {
+          btnMute.addEventListener('click', function() {
             if (!ready) return;
             muted = !muted;
             muted ? player.mute() : player.unMute();
@@ -208,10 +214,6 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
             } catch(e) {}
             requestAnimationFrame(tick);
           }
-
-          var tag = document.createElement('script');
-          tag.src = 'https://www.youtube.com/iframe_api';
-          document.head.appendChild(tag);
         })();
       ` }} />
     </>

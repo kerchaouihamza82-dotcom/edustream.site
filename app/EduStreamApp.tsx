@@ -76,19 +76,6 @@ interface ToastItem {
 
 
 
-/* ─── YouTube player type ──────────────────────────────────── */
-interface YTPlayerInstance {
-  playVideo(): void;
-  pauseVideo(): void;
-  seekTo(seconds: number, allowSeekAhead: boolean): void;
-  mute(): void;
-  unMute(): void;
-  getCurrentTime(): number;
-  getDuration(): number;
-  getPlayerState(): number;
-  loadVideoById(id: string): void;
-  destroy(): void;
-}
 
 /* ══════════════════════════════════════════════════════════════
    COMPONENT
@@ -114,7 +101,8 @@ export default function EduStreamApp() {
   const [timeCurrent, setTimeCurrent] = useState("0:00");
   const [timeTotal, setTimeTotal] = useState("0:00");
 
-  const ytPlayerRef = useRef<YTPlayerInstance | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ytPlayerRef = useRef<any>(null);
   const ytReadyRef = useRef(false);
   const pendingVideoIdRef = useRef<string | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);

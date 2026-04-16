@@ -80,7 +80,7 @@ export async function signUp(email: string, password: string) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  await admin.auth.admin.updateUser(userId, { email_confirm: true });
+  await admin.auth.admin.updateUserById(userId, { email_confirm: true });
 
   // Upsert profile
   await supabase

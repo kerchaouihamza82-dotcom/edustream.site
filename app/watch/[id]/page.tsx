@@ -6,14 +6,34 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data } = await supabase.from("videos").select("title, description").eq("id", id).single();
+  const { data } = await supabase
+    .from("videos")
+    .select("title, description, youtube_id")
+    .eq("id", id)
+    .single();
+
+  const title = data?.title ?? "EduStream";
+  const description = data?.description ?? "Video educativo en EduStream";
+  const thumbnail = data?.youtube_id
+    ? `https://img.youtube.com/vi/${data.youtube_id}/maxresdefault.jpg`
+    : undefined;
+
   return {
-    title: data?.title ?? "EduStream",
-    description: data?.description ?? "Video educativo en EduStream",
+    title,
+    description,
     openGraph: {
-      title: data?.title ?? "EduStream",
-      description: data?.description ?? "Video educativo en EduStream",
-      images: data ? [`https://img.youtube.com/vi/${id}/maxresdefault.jpg`] : [],
+      title,
+      description,
+      url: `https://edustream.site/watch/${id}`,
+      siteName: "EduStream",
+      type: "video.other",
+      ...(thumbnail ? { images: [{ url: thumbnail, width: 1280, height: 720, alt: title }] } : {}),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      ...(thumbnail ? { images: [thumbnail] } : {}),
     },
   };
 }

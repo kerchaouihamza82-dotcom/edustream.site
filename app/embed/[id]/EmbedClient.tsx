@@ -186,22 +186,22 @@ export default function EmbedClient({ ytId, title }) {
         </div>
 
         {/* Progress bar */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px 6px", pointerEvents: "auto" }}>
-          <span style={{ fontSize: ".7rem", color: "rgba(255,255,255,.6)", fontVariantNumeric: "tabular-nums" }}>{timeCur}</span>
-          <div onClick={seekBar} style={{ flex: 1, height: 4, background: "rgba(255,255,255,.2)", borderRadius: 2, cursor: "pointer" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px 6px" }}>
+          <span style={{ fontSize: ".7rem", color: "rgba(255,255,255,.6)", fontVariantNumeric: "tabular-nums", pointerEvents: "none" }}>{timeCur}</span>
+          <div onClick={seekBar} style={{ flex: 1, height: 4, background: "rgba(255,255,255,.2)", borderRadius: 2, cursor: "pointer", pointerEvents: "auto" }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47", borderRadius: 2, transition: "width .4s linear" }} />
           </div>
-          <span style={{ fontSize: ".7rem", color: "rgba(255,255,255,.6)", fontVariantNumeric: "tabular-nums" }}>{timeTot}</span>
+          <span style={{ fontSize: ".7rem", color: "rgba(255,255,255,.6)", fontVariantNumeric: "tabular-nums", pointerEvents: "none" }}>{timeTot}</span>
         </div>
 
         {/* Buttons */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px 14px", pointerEvents: "auto" }}>
-          <button style={btnStyle(false)} onClick={() => skip(-15)}>−15s</button>
-          <button style={btnStyle(true)}  onClick={togglePlay}>{playing ? "⏸ Pausa" : "▶ Play"}</button>
-          <button style={btnStyle(false)} onClick={() => skip(15)}>+15s</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px 14px" }}>
+          <button style={{ ...btnStyle(false), pointerEvents: "auto" }} onClick={() => skip(-15)}>−15s</button>
+          <button style={{ ...btnStyle(true),  pointerEvents: "auto" }} onClick={togglePlay}>{playing ? "⏸ Pausa" : "▶ Play"}</button>
+          <button style={{ ...btnStyle(false), pointerEvents: "auto" }} onClick={() => skip(15)}>+15s</button>
           <div style={{ flex: 1 }} />
-          <button style={btnStyle(false)} onClick={toggleMute}>{muted ? "🔇 Silencio" : "🔊 Sonido"}</button>
-          <button style={btnStyle(false)} onClick={toggleFs}>⛶ Pantalla</button>
+          <button style={{ ...btnStyle(false), pointerEvents: "auto" }} onClick={toggleMute}>{muted ? "🔇 Silencio" : "🔊 Sonido"}</button>
+          <button style={{ ...btnStyle(false), pointerEvents: "auto" }} onClick={toggleFs}>⛶ Pantalla</button>
         </div>
       </div>
     </div>

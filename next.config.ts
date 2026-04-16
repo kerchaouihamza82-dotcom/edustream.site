@@ -7,8 +7,15 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        // Allow /watch pages to be embedded in any iframe (LMS, academies, etc.)
         source: "/watch/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "ALLOWALL" },
+          { key: "Content-Security-Policy", value: "frame-ancestors *" },
+        ],
+      },
+      {
+        // /embed — designed specifically for iframe embedding in LMS/academies
+        source: "/embed/:path*",
         headers: [
           { key: "X-Frame-Options", value: "ALLOWALL" },
           { key: "Content-Security-Policy", value: "frame-ancestors *" },

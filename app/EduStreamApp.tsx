@@ -38,7 +38,7 @@ function thumbUrl(ytId: string) {
 
 function platformLink(id: string) {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}/watch/${id}`;
+  return `${window.location.origin}/embed/${id}`;
 }
 
 function formatTime(s: number) {

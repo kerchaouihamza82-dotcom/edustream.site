@@ -8,6 +8,7 @@ export function middleware(request: NextRequest) {
   // Public routes — no auth required
   if (pathname.startsWith("/auth")) return NextResponse.next();
   if (pathname.startsWith("/watch")) return NextResponse.next();
+  if (pathname.startsWith("/embed")) return NextResponse.next();
 
   if (!auth) {
     const url = request.nextUrl.clone();

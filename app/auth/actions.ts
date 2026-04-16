@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { headers } from "next/headers";
 
 export async function signIn(email: string, password: string) {
@@ -74,6 +75,13 @@ export async function signUp(email: string, password: string) {
     return { error: "No se pudo crear la cuenta. Inténtalo de nuevo." };
   }
 
+  // Force-confirm the email using the Admin API so the user can log in immediately
+  const admin = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  await admin.auth.admin.updateUser(userId, { email_confirm: true });
+
   // Upsert profile
   await supabase
     .from("profiles")
@@ -91,14 +99,13 @@ export async function signUp(email: string, password: string) {
       .insert({ ip_address: ip, count: 1 });
   }
 
-  // Auto sign-in immediately after registration (bypasses email confirmation requirement)
+  // Sign in immediately after confirmed registration
   const { error: signInError } = await supabase.auth.signInWithPassword({
     email: normalizedEmail,
     password,
   });
 
   if (signInError) {
-    // Registration succeeded but auto-login failed — tell user to log in manually
     return { error: "Cuenta creada. Inicia sesión con tu email y contraseña." };
   }
 

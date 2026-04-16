@@ -1,35 +1,29 @@
 "use client";
 
 import { useState } from "react";
-
-const VALID_EMAIL = "kerchaouihamza82@gmail.com";
-const VALID_PASSWORD = "123456789K";
+import { loginAction } from "./action";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     setLoading(true);
-
-    setTimeout(() => {
-      if (email.trim() === VALID_EMAIL && password === VALID_PASSWORD) {
-        document.cookie = "edustream_auth=1; path=/; max-age=86400";
-        window.location.href = "/";
-      } else {
-        setError("Email o contraseña incorrectos.");
-        setLoading(false);
-      }
-    }, 400);
+    const formData = new FormData(e.currentTarget);
+    const result = await loginAction(formData);
+    if (result?.error) {
+      setError(result.error);
+      setLoading(false);
+    }
   }
 
   return (
     <>
       <style>{`
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0a0a0f; }
         .auth-root {
           min-height: 100vh;
           display: flex;
@@ -55,22 +49,25 @@ export default function LoginPage() {
           align-items: center;
           gap: 8px;
           color: #fff;
+          font-family: sans-serif;
         }
         .auth-logo span { color: #e8ff47; }
         .auth-dot {
           width: 8px; height: 8px; border-radius: 50%;
-          background: #e8ff47;
+          background: #e8ff47; flex-shrink: 0;
         }
         .auth-title {
           font-size: 1.3rem;
           font-weight: 700;
           color: #fff;
           margin-bottom: 6px;
+          font-family: sans-serif;
         }
         .auth-sub {
           font-size: 0.88rem;
           color: #666;
           margin-bottom: 28px;
+          font-family: sans-serif;
         }
         .form-group {
           display: flex;
@@ -84,6 +81,7 @@ export default function LoginPage() {
           letter-spacing: 0.06em;
           text-transform: uppercase;
           color: #888;
+          font-family: sans-serif;
         }
         .form-input {
           background: #0d0d14;
@@ -95,7 +93,7 @@ export default function LoginPage() {
           outline: none;
           width: 100%;
           transition: border-color 0.2s;
-          box-sizing: border-box;
+          font-family: sans-serif;
         }
         .form-input:focus { border-color: #e8ff47; }
         .form-input::placeholder { color: #444; }
@@ -107,6 +105,7 @@ export default function LoginPage() {
           font-size: 0.88rem;
           color: #ff6b6b;
           margin-bottom: 16px;
+          font-family: sans-serif;
         }
         .auth-btn {
           width: 100%;
@@ -120,11 +119,9 @@ export default function LoginPage() {
           cursor: pointer;
           transition: all 0.2s;
           margin-top: 4px;
+          font-family: sans-serif;
         }
-        .auth-btn:hover:not(:disabled) {
-          filter: brightness(1.08);
-          transform: translateY(-1px);
-        }
+        .auth-btn:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
         .auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
 
@@ -143,13 +140,13 @@ export default function LoginPage() {
               <label className="form-label" htmlFor="email">Email</label>
               <input
                 id="email"
+                name="email"
                 className="form-input"
                 type="email"
                 placeholder="tu@email.com"
                 autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
+                required
               />
             </div>
 
@@ -157,13 +154,13 @@ export default function LoginPage() {
               <label className="form-label" htmlFor="password">Contraseña</label>
               <input
                 id="password"
+                name="password"
                 className="form-input"
                 type="password"
                 placeholder="••••••••"
                 autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
+                required
               />
             </div>
 

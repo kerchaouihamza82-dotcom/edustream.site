@@ -381,22 +381,31 @@ export default function EduStreamApp() {
         .player-page{max-width:900px;margin:0 auto;padding:40px 24px}
         .back-btn{display:inline-flex;align-items:center;gap:8px;background:none;border:none;color:var(--muted);font-family:var(--font);font-size:.88rem;cursor:pointer;padding:0;margin-bottom:24px;transition:color .2s}
         .back-btn:hover{color:var(--text)}
-        #player-wrap{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.7)}
+        #player-wrap{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);border:1px solid var(--border)}
         #yt-player{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-        .player-overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;background:linear-gradient(transparent 40%,rgba(0,0,0,.85) 100%)}
-        .progress-area{padding:0 20px;cursor:pointer}
-        .progress-bar{height:4px;background:rgba(255,255,255,.15);border-radius:2px;overflow:hidden;transition:height .15s}
-        .progress-area:hover .progress-bar{height:6px}
-        .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .4s linear}
-        .time-row{display:flex;justify-content:space-between;padding:4px 0 10px;font-size:.78rem;color:rgba(255,255,255,.6)}
-        .controls{display:flex;align-items:center;justify-content:center;gap:16px;padding:0 20px 20px}
-        .ctrl-btn{background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.9rem;transition:all .2s}
-        .ctrl-btn:hover{background:rgba(255,255,255,.2)}
-        .ctrl-btn.play-pause{width:52px;height:52px;background:var(--accent);color:#0a0a0f;font-size:1.1rem}
+        .player-overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;background:linear-gradient(to top,rgba(0,0,0,.85) 0%,rgba(0,0,0,.2) 40%,transparent 70%);opacity:0;transition:opacity .3s;z-index:5}
+        #player-wrap:hover .player-overlay{opacity:1}
+        .progress-bar-wrap{padding:0 24px 4px;display:flex;align-items:center;gap:12px}
+        .progress-track{flex:1;height:3px;background:rgba(255,255,255,.2);border-radius:2px;cursor:pointer;position:relative}
+        .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .5s linear;width:0%}
+        .time-label{font-size:.75rem;color:rgba(255,255,255,.6);font-family:monospace;white-space:nowrap}
+        .player-controls{display:flex;align-items:center;gap:10px;padding:20px 24px}
+        .ctrl-btn{background:rgba(255,255,255,.1);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.15);color:white;border-radius:10px;padding:10px 18px;font-family:var(--font);font-weight:600;font-size:.85rem;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px}
+        .ctrl-btn:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+        .ctrl-btn.play-pause{background:var(--accent);color:#000;border-color:var(--accent);padding:10px 22px}
         .ctrl-btn.play-pause:hover{filter:brightness(1.1)}
-        .ctrl-btn.active{color:var(--accent)}
-        .player-title{font-weight:700;font-size:1.3rem;margin:20px 0 8px}
-        .player-cat{color:var(--muted);font-size:.88rem}
+        .ctrl-spacer{flex:1}
+        .player-info{padding:0 24px 16px;display:flex;align-items:center;justify-content:space-between}
+        .now-playing-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-weight:600}
+        .now-playing-title{font-weight:700;font-size:1.1rem}
+        .player-back{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:.9rem;cursor:pointer;margin-bottom:24px;transition:color .2s;background:none;border:none;font-family:var(--font)}
+        .player-back:hover{color:var(--accent)}
+        .player-meta{margin-top:24px;display:grid;grid-template-columns:1fr auto;gap:20px;align-items:start}
+        @media(max-width:600px){.player-meta{grid-template-columns:1fr}}
+        .player-share-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;min-width:260px}
+        .share-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin-bottom:10px}
+        .link-copy-row{display:flex;gap:10px;align-items:center}
+        .link-url{flex:1;font-family:monospace;font-size:.85rem;background:var(--bg);padding:10px 14px;border-radius:8px;border:1px solid var(--border);color:#47d4ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .toast-container{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:9999}
         .toast{padding:12px 20px;border-radius:10px;font-size:.88rem;font-weight:500;animation:toastIn .3s ease;max-width:320px}
         @keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
@@ -510,27 +519,66 @@ export default function EduStreamApp() {
 
         {/* ── PLAYER VIEW ── */}
         {view === "player" && currentEntry && (
-          <div className="player-page">
-            <button className="back-btn" onClick={backToLibrary}>&#8592; Volver a la biblioteca</button>
+          <main>
+            <button className="player-back" onClick={backToLibrary}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+              Volver a la biblioteca
+            </button>
             <div id="player-wrap">
               <div id="yt-player" />
               <div className="player-overlay">
-                <div className="progress-area" onClick={seekFromBar}>
-                  <div className="progress-bar"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
-                  <div className="time-row"><span>{timeCurrent}</span><span>{timeTotal}</span></div>
+                <div className="progress-bar-wrap">
+                  <span className="time-label">{timeCurrent}</span>
+                  <div className="progress-track" onClick={seekFromBar}>
+                    <div className="progress-fill" style={{ width: `${progress}%` }} />
+                  </div>
+                  <span className="time-label">{timeTotal}</span>
                 </div>
-                <div className="controls">
-                  <button className="ctrl-btn" onClick={() => skipTime(-15)} title="Retroceder 15s">&#8630;</button>
-                  <button className="ctrl-btn play-pause" onClick={togglePlay}>{isPlaying ? "⏸" : "▶"}</button>
-                  <button className="ctrl-btn" onClick={() => skipTime(15)} title="Adelantar 15s">&#8631;</button>
-                  <button className={`ctrl-btn${isMuted ? " active" : ""}`} onClick={toggleMute}>{isMuted ? "🔇" : "🔊"}</button>
-                  <button className="ctrl-btn" onClick={toggleFullscreen}>&#x26F6;</button>
+                <div className="player-controls">
+                  <button className="ctrl-btn" onClick={() => skipTime(-15)} title="-15 segundos">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-5"/></svg>
+                    {"\u221215s"}
+                  </button>
+                  <button className="ctrl-btn play-pause" onClick={togglePlay}>
+                    {isPlaying ? "⏸ Pausa" : "⏵ Play"}
+                  </button>
+                  <button className="ctrl-btn" onClick={() => skipTime(15)} title="+15 segundos">
+                    +15s
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M23 4v6h-6"/><path d="M20.49 15A9 9 0 1 1 20 10"/></svg>
+                  </button>
+                  <div className="ctrl-spacer" />
+                  <button className="ctrl-btn" onClick={toggleMute}>{isMuted ? "🔇 Silencio" : "🔊 Sonido"}</button>
+                  <button className="ctrl-btn" onClick={toggleFullscreen}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                    Pantalla completa
+                  </button>
+                </div>
+                <div className="player-info">
+                  <div>
+                    <div className="now-playing-label">Reproduciendo ahora</div>
+                    <div className="now-playing-title">{currentEntry.title}</div>
+                  </div>
+                  <span className="badge">{currentEntry.category}</span>
                 </div>
               </div>
             </div>
-            <div className="player-title">{currentEntry.title}</div>
-            <div className="player-cat">{currentEntry.category}</div>
-          </div>
+            <div className="player-meta">
+              <div>
+                <div className="section-label" style={{ marginTop: "24px" }}>Detalles del video</div>
+                <div style={{ fontWeight: 700, fontSize: "1.4rem", marginBottom: "8px" }}>{currentEntry.title}</div>
+                <div style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
+                  {"Añadido el "}{new Date(currentEntry.added).toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
+                </div>
+              </div>
+              <div className="player-share-card">
+                <div className="share-label">Compartir enlace de plataforma</div>
+                <div className="link-copy-row">
+                  <div className="link-url">{platformLink(currentEntry.id)}</div>
+                  <button className="btn btn-ghost btn-sm" onClick={() => copyLink(currentEntry.id)}>Copiar</button>
+                </div>
+              </div>
+            </div>
+          </main>
         )}
 
         {/* ── Toasts ── */}

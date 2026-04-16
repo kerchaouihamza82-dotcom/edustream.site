@@ -74,17 +74,6 @@ interface ToastItem {
   type: "success" | "error";
 }
 
-/* ─── YouTube IFrame API types ─────────────────────────────── */
-declare global {
-  interface Window {
-    YT: {
-      Player: new (el: string | HTMLElement, opts: object) => YTPlayerInstance;
-      PlayerState: { PLAYING: number; PAUSED: number; ENDED: number };
-    };
-    onYouTubeIframeAPIReady: () => void;
-  }
-}
-
 interface YTPlayerInstance {
   playVideo: () => void;
   pauseVideo: () => void;

@@ -91,6 +91,17 @@ export async function signUp(email: string, password: string) {
       .insert({ ip_address: ip, count: 1 });
   }
 
+  // Auto sign-in immediately after registration (bypasses email confirmation requirement)
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password,
+  });
+
+  if (signInError) {
+    // Registration succeeded but auto-login failed — tell user to log in manually
+    return { error: "Cuenta creada. Inicia sesión con tu email y contraseña." };
+  }
+
   return { error: null };
 }
 

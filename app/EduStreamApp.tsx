@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
-import { createClient } from "@/lib/supabase/client";
-import { signOut } from "@/app/auth/actions";
-import type { User } from "@supabase/supabase-js";
+import { useSearchParams } from "next/navigation";
 
 /* ─── Types ────────────────────────────────────────────────── */
 interface VideoEntry {
@@ -86,17 +82,27 @@ interface YTPlayerInstance {
   destroy: () => void;
 }
 
+const STORAGE_KEY = "edustream_videos";
+
+function loadFromStorage(): VideoEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveToStorage(videos: VideoEntry[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(videos));
+}
+
 /* ══════════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════════ */
 export default function EduStreamApp() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const supabase = createClient();
-
-  const [user, setUser] = useState<User | null>(null);
-  const [username, setUsername] = useState<string>("");
-  const [authLoading, setAuthLoading] = useState(true);
 
   const [view, setView] = useState<View>("add");
 
@@ -110,7 +116,6 @@ export default function EduStreamApp() {
   /* ─── Library ────────────────────────────── */
   const [db, setDb] = useState<VideoEntry[]>([]);
   const [filter, setFilter] = useState("");
-  const [dbLoading, setDbLoading] = useState(false);
 
   /* ─── Player ─────────────────────────────── */
   const [currentEntry, setCurrentEntry] = useState<VideoEntry | null>(null);
@@ -139,66 +144,10 @@ export default function EduStreamApp() {
     []
   );
 
-  /* ─── Auth state ─────────────────────────── */
+  /* ─── Load from localStorage ─────────────── */
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user);
-      if (user?.user_metadata?.username) {
-        setUsername(user.user_metadata.username);
-      } else if (user) {
-        // Fallback: derive from email
-        setUsername(user.email?.replace("@app.local", "") ?? "");
-      }
-      setAuthLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      const u = session?.user;
-      if (u?.user_metadata?.username) {
-        setUsername(u.user_metadata.username);
-      } else if (u) {
-        setUsername(u.email?.replace("@app.local", "") ?? "");
-      } else {
-        setUsername("");
-      }
-    });
-
-    return () => subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setDb(loadFromStorage());
   }, []);
-
-  /* ─── Load DB from Supabase ──────────────── */
-  const loadVideos = useCallback(async () => {
-    if (!user) return;
-    setDbLoading(true);
-    const { data, error } = await supabase
-      .from("videos")
-      .select("id, youtube_id, title, description, created_at, slug")
-      .eq("user_id", user.id)
-      .eq("is_active", true)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      toast("Error cargando la biblioteca", "error");
-    } else {
-      setDb(
-        (data ?? []).map((v) => ({
-          id: v.slug ?? v.id,
-          ytId: v.youtube_id,
-          title: v.title,
-          category: v.description ?? "Sin categoría",
-          added: v.created_at,
-        }))
-      );
-    }
-    setDbLoading(false);
-  }, [user, supabase, toast]);
-
-  useEffect(() => {
-    if (user) loadVideos();
-    else setDb([]);
-  }, [user, loadVideos]);
 
   /* ─── Progress timer ─────────────────────── */
   const startProgressTimer = useCallback(() => {
@@ -278,1031 +227,479 @@ export default function EduStreamApp() {
 
   /* ─── Deep link ?v= ──────────────────────── */
   useEffect(() => {
-    if (authLoading) return;
     const vid = searchParams.get("v");
     if (!vid) return;
+    const all = loadFromStorage();
+    const found = all.find((e) => e.id === vid);
+    if (found) {
+      setCurrentEntry(found);
+      setView("player");
+    }
+  }, [searchParams]);
 
-    async function loadDeepLink() {
-      // Try Supabase first (public read policy on videos)
-      const { data } = await supabase
-        .from("videos")
-        .select("id, youtube_id, title, description, created_at, slug")
-        .eq("slug", vid)
-        .eq("is_active", true)
-        .maybeSingle();
+  /* ─── Play a video ───────────────────────── */
+  const playEntry = useCallback(
+    (entry: VideoEntry) => {
+      setCurrentEntry(entry);
+      setProgress(0);
+      setTimeCurrent("0:00");
+      setTimeTotal("0:00");
+      setIsPlaying(false);
 
-      if (data) {
-        const entry: VideoEntry = {
-          id: data.slug ?? data.id,
-          ytId: data.youtube_id,
-          title: data.title,
-          category: data.description ?? "Sin categoría",
-          added: data.created_at,
-        };
-        openPlayerEntry(entry);
-      } else {
-        toast("Video no encontrado en esta plataforma", "error");
+      if (ytPlayerRef.current) {
+        try { ytPlayerRef.current.destroy(); } catch {}
+        ytPlayerRef.current = null;
       }
-    }
 
-    loadDeepLink();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading]);
+      setView("player");
 
-  /* ─── Open player ────────────────────────── */
-  function openPlayerEntry(entry: VideoEntry) {
-    setCurrentEntry(entry);
-    setView("player");
-
-    if (!ytReadyRef.current) {
-      pendingVideoIdRef.current = entry.ytId;
-      return;
-    }
-
-    if (!ytPlayerRef.current) {
-      setTimeout(() => createPlayer(entry.ytId), 50);
-    } else {
-      ytPlayerRef.current.loadVideoById(entry.ytId);
-      setIsPlaying(true);
-      startProgressTimer();
-    }
-  }
+      setTimeout(() => {
+        if (ytReadyRef.current) {
+          createPlayer(entry.ytId);
+        } else {
+          pendingVideoIdRef.current = entry.ytId;
+        }
+      }, 100);
+    },
+    [createPlayer]
+  );
 
   /* ─── Add video ──────────────────────────── */
-  async function addVideo() {
-    if (!user) {
-      router.push("/auth/login");
-      return;
-    }
-
-    if (!ytUrl.trim()) {
-      toast("Introduce un enlace de YouTube", "error");
-      return;
-    }
+  const handleAdd = useCallback(() => {
     const ytId = extractYouTubeId(ytUrl.trim());
-    if (!ytId) {
-      toast("Enlace de YouTube no válido", "error");
-      return;
-    }
+    if (!ytId) { toast("URL de YouTube no válida", "error"); return; }
+    if (!ytTitle.trim()) { toast("Escribe un título", "error"); return; }
 
-    // Check duplicate for this user
-    const { data: existing } = await supabase
-      .from("videos")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("youtube_id", ytId)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (existing) {
-      toast("Este video ya existe en tu biblioteca", "error");
-      return;
-    }
-
-    const slug = genId();
-
-    const { data: inserted, error } = await supabase
-      .from("videos")
-      .insert({
-        user_id: user.id,
-        youtube_id: ytId,
-        title: ytTitle.trim() || "Video sin título",
-        description: ytCategory.trim() || "Sin categoría",
-        slug,
-        is_active: true,
-        views: 0,
-      })
-      .select("id, youtube_id, title, description, created_at, slug")
-      .single();
-
-    if (error || !inserted) {
-      toast("Error al añadir el video", "error");
-      return;
-    }
-
+    const id = genId();
     const entry: VideoEntry = {
-      id: inserted.slug ?? inserted.id,
-      ytId: inserted.youtube_id,
-      title: inserted.title,
-      category: inserted.description ?? "Sin categoría",
-      added: inserted.created_at,
+      id,
+      ytId,
+      title: ytTitle.trim(),
+      category: ytCategory.trim() || "Sin categoría",
+      added: new Date().toISOString(),
     };
 
-    // Save generated link to links table
-    const link = platformLink(entry.id);
-    await supabase.from("links").insert({
-      user_id: user.id,
-      url: link,
-    });
+    const updated = [entry, ...db];
+    setDb(updated);
+    saveToStorage(updated);
 
-    setDb((prev) => [entry, ...prev]);
+    const link = platformLink(id);
     setGeneratedLink(link);
     setLastEntry(entry);
-    toast("Video añadido correctamente");
-  }
-
-  function clearForm() {
     setYtUrl("");
     setYtTitle("");
     setYtCategory("");
-    setGeneratedLink(null);
-    setLastEntry(null);
-  }
+    toast("Video añadido correctamente");
+  }, [ytUrl, ytTitle, ytCategory, db, toast]);
 
   /* ─── Delete video ───────────────────────── */
-  async function deleteVideo(id: string) {
-    if (!user) return;
-    // Soft delete via is_active = false
-    await supabase
-      .from("videos")
-      .update({ is_active: false })
-      .eq("slug", id)
-      .eq("user_id", user.id);
+  const handleDelete = useCallback(
+    (id: string) => {
+      const updated = db.filter((v) => v.id !== id);
+      setDb(updated);
+      saveToStorage(updated);
+      toast("Video eliminado");
+    },
+    [db, toast]
+  );
 
-    setDb((prev) => prev.filter((e) => e.id !== id));
-    toast("Video eliminado");
-  }
-
-  function copyLink(entryId: string) {
-    navigator.clipboard
-      .writeText(platformLink(entryId))
-      .then(() => toast("Enlace copiado al portapapeles"));
-  }
+  /* ─── Copy link ──────────────────────────── */
+  const copyLink = useCallback(
+    (link: string) => {
+      navigator.clipboard.writeText(link).then(
+        () => toast("Enlace copiado"),
+        () => toast("No se pudo copiar", "error")
+      );
+    },
+    [toast]
+  );
 
   /* ─── Player controls ────────────────────── */
-  function togglePlay() {
+  const togglePlay = useCallback(() => {
     const p = ytPlayerRef.current;
     if (!p) return;
-    const state = p.getPlayerState();
-    if (state === window.YT.PlayerState.PLAYING) {
-      p.pauseVideo();
-      setIsPlaying(false);
-    } else {
-      p.playVideo();
-      setIsPlaying(true);
-    }
-  }
+    if (isPlaying) { p.pauseVideo(); setIsPlaying(false); }
+    else { p.playVideo(); setIsPlaying(true); startProgressTimer(); }
+  }, [isPlaying, startProgressTimer]);
 
-  function skipTime(secs: number) {
+  const toggleMute = useCallback(() => {
     const p = ytPlayerRef.current;
     if (!p) return;
-    p.seekTo(Math.max(0, p.getCurrentTime() + secs), true);
-  }
+    if (isMuted) { p.unMute(); setIsMuted(false); }
+    else { p.mute(); setIsMuted(true); }
+  }, [isMuted]);
 
-  function toggleMute() {
+  const skip = useCallback((secs: number) => {
     const p = ytPlayerRef.current;
     if (!p) return;
-    setIsMuted((prev) => {
-      const next = !prev;
-      next ? p.mute() : p.unMute();
-      return next;
-    });
-  }
+    p.seekTo(p.getCurrentTime() + secs, true);
+  }, []);
 
-  function toggleFullscreen() {
-    const el = document.getElementById("player-wrap");
-    if (!el) return;
-    if (!document.fullscreenElement) {
-      el.requestFullscreen().catch((err) =>
-        toast("Error pantalla completa: " + err.message, "error")
-      );
-    } else {
-      document.exitFullscreen();
-    }
-  }
-
-  function seekFromBar(e: React.MouseEvent<HTMLDivElement>) {
+  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const p = ytPlayerRef.current;
-    if (!p || typeof p.getDuration !== "function") return;
+    if (!p) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    p.seekTo(p.getDuration() * pct, true);
-  }
+    const ratio = (e.clientX - rect.left) / rect.width;
+    p.seekTo(ratio * p.getDuration(), true);
+  }, []);
 
-  function backToLibrary() {
-    const p = ytPlayerRef.current;
-    if (p && typeof p.pauseVideo === "function") p.pauseVideo();
-    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-    setIsPlaying(false);
-    setView("library");
-  }
+  const enterFullscreen = useCallback(() => {
+    const el = document.getElementById("player-wrapper");
+    if (el?.requestFullscreen) el.requestFullscreen();
+  }, []);
 
-  async function handleSignOut() {
-    await signOut();
-    setUser(null);
-    setDb([]);
-    router.push("/auth/login");
-  }
+  const filtered = db.filter(
+    (v) =>
+      v.title.toLowerCase().includes(filter.toLowerCase()) ||
+      v.category.toLowerCase().includes(filter.toLowerCase())
+  );
 
-  /* ─── Derived values ─────────────────────── */
-  const filteredDb = filter
-    ? db.filter(
-        (e) =>
-          e.title.toLowerCase().includes(filter.toLowerCase()) ||
-          e.category.toLowerCase().includes(filter.toLowerCase())
-      )
-    : db;
-
-  const categories = new Set(db.map((e) => e.category)).size;
-
-  /* ══════════════════════════════════════════
-     RENDER
-  ══════════════════════════════════════════ */
+  /* ══ RENDER ══════════════════════════════════════════════════ */
   return (
     <>
       <style>{`
-        .app { position: relative; z-index: 1; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0a0a0a; color: #e5e5e5; font-family: 'Inter', system-ui, sans-serif; }
+        .app { min-height: 100vh; display: flex; flex-direction: column; }
 
-        header {
+        /* ── Header ── */
+        .header {
           display: flex; align-items: center; justify-content: space-between;
-          padding: 20px 40px;
-          border-bottom: 1px solid var(--border);
-          position: sticky; top: 0;
-          background: rgba(10,10,15,0.85);
-          backdrop-filter: blur(20px);
-          z-index: 100;
+          padding: 14px 24px; background: #111; border-bottom: 1px solid #222;
+          position: sticky; top: 0; z-index: 50;
         }
-        .logo {
-          font-family: var(--font-head);
-          font-weight: 800; font-size: 1.4rem;
-          letter-spacing: -0.5px;
-          display: flex; align-items: center; gap: 8px;
+        .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+        .logo-icon { width: 32px; height: 32px; background: #e50914; border-radius: 6px;
+          display: flex; align-items: center; justify-content: center; }
+        .logo-text { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+        .logo-text span { color: #e50914; }
+        .nav { display: flex; gap: 4px; }
+        .nav-btn {
+          padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer;
+          font-size: 14px; font-weight: 500; transition: all .15s;
+          background: transparent; color: #aaa;
         }
-        .logo span { color: var(--accent); }
-        .logo-dot {
-          width: 8px; height: 8px; border-radius: 50%;
-          background: var(--accent);
-          animation: pulse 2s ease-in-out infinite;
-        }
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.4); opacity: 0.6; }
-        }
-        .header-right { display: flex; align-items: center; gap: 12px; }
-        .nav-tabs {
-          display: flex; gap: 4px;
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: 10px; padding: 4px;
-        }
-        .nav-tab {
-          padding: 8px 20px; border-radius: 7px;
-          border: none; background: transparent;
-          color: var(--muted);
-          font-family: var(--font-body); font-size: 0.9rem; font-weight: 500;
-          cursor: pointer; transition: all 0.2s;
-        }
-        .nav-tab.active { background: var(--card); color: var(--text); }
-        .nav-tab:hover:not(.active) { color: var(--text); }
+        .nav-btn:hover { background: #1e1e1e; color: #fff; }
+        .nav-btn.active { background: #e50914; color: #fff; }
 
-        .user-pill {
-          display: flex; align-items: center; gap: 8px;
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: 10px; padding: 6px 14px;
-        }
-        .user-avatar {
-          width: 24px; height: 24px; border-radius: 50%;
-          background: var(--accent);
-          display: flex; align-items: center; justify-content: center;
-          font-size: 0.72rem; font-weight: 700; color: #0a0a0f;
-        }
-        .user-name { font-size: 0.85rem; font-weight: 500; color: var(--text); }
-        .sign-out-btn {
-          background: none; border: none;
-          color: var(--muted); font-family: var(--font-body);
-          font-size: 0.8rem; cursor: pointer; padding: 0;
-          transition: color 0.2s;
-        }
-        .sign-out-btn:hover { color: var(--danger); }
-        .sign-in-btn {
-          padding: 8px 18px; border-radius: 8px;
-          background: var(--accent); color: #0a0a0f;
-          border: none; font-family: var(--font-body);
-          font-weight: 600; font-size: 0.85rem;
-          cursor: pointer; transition: all 0.2s;
-        }
-        .sign-in-btn:hover { filter: brightness(1.08); }
+        /* ── Main ── */
+        .main { flex: 1; padding: 32px 24px; max-width: 900px; margin: 0 auto; width: 100%; }
 
-        main { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
-
-        .section-label {
-          font-size: 0.72rem; font-weight: 600;
-          letter-spacing: 0.12em; text-transform: uppercase;
-          color: var(--accent); margin-bottom: 8px;
-        }
-        .section-title {
-          font-family: var(--font-head);
-          font-size: 2rem; font-weight: 700;
-          line-height: 1.15; margin-bottom: 32px;
-        }
-
+        /* ── Card ── */
         .card {
-          background: var(--card);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-lg);
-          padding: 32px; position: relative; overflow: hidden;
+          background: #111; border: 1px solid #222; border-radius: 12px;
+          padding: 28px; margin-bottom: 24px;
         }
-        .card::before {
-          content: '';
-          position: absolute; top: 0; left: 0; right: 0; height: 1px;
-          background: linear-gradient(90deg, transparent, var(--accent), transparent);
-          opacity: 0.4;
-        }
+        .card-title { font-size: 18px; font-weight: 600; color: #fff; margin-bottom: 20px; }
 
-        .auth-prompt {
-          text-align: center; padding: 60px 32px;
+        /* ── Form ── */
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; font-weight: 500; }
+        .form-input {
+          width: 100%; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 8px;
+          padding: 10px 14px; color: #e5e5e5; font-size: 14px; outline: none;
+          transition: border-color .15s;
         }
-        .auth-prompt-title {
-          font-family: var(--font-head);
-          font-size: 1.4rem; font-weight: 700;
-          margin-bottom: 12px;
-        }
-        .auth-prompt-desc {
-          color: var(--muted); font-size: 0.9rem;
-          margin-bottom: 24px; max-width: 360px; margin-inline: auto;
-          line-height: 1.6;
-        }
-
-        .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-        @media (max-width: 640px) { .input-row { grid-template-columns: 1fr; } }
-        .input-group { display: flex; flex-direction: column; gap: 8px; }
-        .input-group.full { grid-column: 1 / -1; }
-        label {
-          font-size: 0.8rem; font-weight: 500; letter-spacing: 0.05em;
-          text-transform: uppercase; color: var(--muted);
-        }
-        input[type="text"] {
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: var(--radius);
-          padding: 14px 16px;
-          font-family: var(--font-body); font-size: 0.95rem;
-          color: var(--text);
-          transition: all 0.2s; outline: none; width: 100%;
-        }
-        input[type="text"]:focus {
-          border-color: var(--accent);
-          box-shadow: 0 0 0 3px rgba(232,255,71,0.08);
-        }
-        input[type="text"]::placeholder { color: var(--muted); }
-
+        .form-input:focus { border-color: #e50914; }
+        .form-input::placeholder { color: #555; }
         .btn {
-          display: inline-flex; align-items: center; justify-content: center;
-          gap: 8px; padding: 13px 24px;
-          border-radius: var(--radius); border: none;
-          font-family: var(--font-body); font-weight: 600; font-size: 0.9rem;
-          cursor: pointer; transition: all 0.2s; white-space: nowrap;
+          padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer;
+          font-size: 14px; font-weight: 600; transition: all .15s;
         }
-        .btn-primary { background: var(--accent); color: #0a0a0f; }
-        .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--glow); filter: brightness(1.05); }
-        .btn-primary:active { transform: translateY(0); }
-        .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-        .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
-        .btn-danger { background: rgba(255,92,92,0.1); color: var(--danger); border: 1px solid rgba(255,92,92,0.2); }
-        .btn-danger:hover { background: rgba(255,92,92,0.2); }
-        .btn-sm { padding: 8px 14px; font-size: 0.8rem; border-radius: 8px; }
-        .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 24px; }
+        .btn-primary { background: #e50914; color: #fff; }
+        .btn-primary:hover { background: #c4060f; }
+        .btn-secondary { background: #1e1e1e; color: #ccc; }
+        .btn-secondary:hover { background: #2a2a2a; color: #fff; }
+        .btn-danger { background: transparent; color: #e50914; border: 1px solid #e50914; }
+        .btn-danger:hover { background: #e50914; color: #fff; }
 
-        .link-result {
-          margin-top: 24px;
-          background: var(--surface);
-          border: 1px solid var(--accent);
-          border-radius: var(--radius); padding: 16px 20px;
-          animation: slideIn 0.3s ease;
+        /* ── Generated link ── */
+        .link-box {
+          background: #0d1f0f; border: 1px solid #1a4a1e; border-radius: 10px;
+          padding: 20px; margin-top: 20px;
         }
-        @keyframes slideIn {
-          from { opacity: 0; transform: translateY(-6px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .link-result-label {
-          font-size: 0.75rem; text-transform: uppercase;
-          letter-spacing: 0.08em; color: var(--accent);
-          font-weight: 600; margin-bottom: 10px;
-        }
+        .link-box h3 { font-size: 14px; color: #4caf50; font-weight: 600; margin-bottom: 12px; }
         .link-copy-row { display: flex; gap: 10px; align-items: center; }
-        .link-url {
-          flex: 1; font-family: monospace; font-size: 0.85rem;
-          background: var(--bg); padding: 10px 14px;
-          border-radius: 8px; border: 1px solid var(--border);
-          color: var(--accent2);
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        .link-text {
+          flex: 1; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 6px;
+          padding: 8px 12px; color: #7ee87a; font-size: 13px; font-family: monospace;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
 
-        .library-header {
-          display: flex; align-items: center; justify-content: space-between;
-          margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+        /* ── Library ── */
+        .search-bar {
+          width: 100%; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 8px;
+          padding: 10px 14px; color: #e5e5e5; font-size: 14px; outline: none;
+          margin-bottom: 20px; transition: border-color .15s;
         }
-        .library-search {
-          display: flex; align-items: center; gap: 10px;
-          background: var(--card); border: 1px solid var(--border);
-          border-radius: var(--radius); padding: 10px 16px;
-          flex: 1; max-width: 300px;
-        }
-        .library-search input {
-          background: none; border: none; outline: none;
-          font-family: var(--font-body); font-size: 0.9rem;
-          color: var(--text); width: 100%;
-        }
-        .library-search input::placeholder { color: var(--muted); }
-        .library-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 16px;
-        }
+        .search-bar:focus { border-color: #e50914; }
+        .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
         .video-card {
-          background: var(--card); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); overflow: hidden;
-          transition: all 0.25s; cursor: pointer;
+          background: #0d0d0d; border: 1px solid #1e1e1e; border-radius: 10px;
+          overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s;
         }
-        .video-card:hover {
-          border-color: rgba(232,255,71,0.3);
-          transform: translateY(-3px);
-          box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-        }
-        .video-thumb {
-          width: 100%; aspect-ratio: 16/9;
-          background: var(--surface); position: relative; overflow: hidden;
-        }
-        .video-thumb img { width: 100%; height: 100%; object-fit: cover; }
-        .thumb-play {
-          position: absolute; inset: 0;
+        .video-card:hover { border-color: #e50914; transform: translateY(-2px); }
+        .thumb-wrap { position: relative; aspect-ratio: 16/9; background: #111; }
+        .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; }
+        .play-overlay {
+          position: absolute; inset: 0; background: rgba(0,0,0,.4);
           display: flex; align-items: center; justify-content: center;
-          background: rgba(0,0,0,0.4);
-          opacity: 0; transition: opacity 0.2s;
+          opacity: 0; transition: opacity .15s;
         }
-        .video-card:hover .thumb-play { opacity: 1; }
-        .thumb-play-icon {
-          width: 52px; height: 52px; border-radius: 50%;
-          background: var(--accent); color: #000;
+        .video-card:hover .play-overlay { opacity: 1; }
+        .play-circle {
+          width: 48px; height: 48px; background: #e50914; border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
-          font-size: 1.2rem; padding-left: 4px;
         }
-        .video-card-body { padding: 16px; }
-        .video-card-title {
-          font-family: var(--font-head); font-weight: 600; font-size: 0.95rem;
-          margin-bottom: 6px; line-height: 1.3;
+        .video-info { padding: 12px; }
+        .video-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .video-cat { font-size: 12px; color: #666; margin-bottom: 10px; }
+        .video-actions { display: flex; gap: 8px; }
+        .icon-btn {
+          background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px;
+          padding: 5px 10px; cursor: pointer; font-size: 12px; color: #888;
+          transition: all .15s; display: flex; align-items: center; gap: 4px;
         }
-        .video-card-meta {
-          font-size: 0.78rem; color: var(--muted);
-          display: flex; align-items: center; justify-content: space-between;
-        }
-        .video-card-actions {
-          display: flex; gap: 8px; padding: 12px 16px;
-          border-top: 1px solid var(--border);
-        }
-        .empty-state { text-align: center; padding: 80px 20px; color: var(--muted); }
-        .empty-text { font-size: 0.9rem; }
+        .icon-btn:hover { background: #252525; color: #fff; }
+        .icon-btn.del:hover { border-color: #e50914; color: #e50914; }
 
-        .player-back {
-          display: inline-flex; align-items: center; gap: 8px;
-          color: var(--muted); font-size: 0.9rem; cursor: pointer;
-          margin-bottom: 24px; transition: color 0.2s;
-          background: none; border: none;
-          font-family: var(--font-body);
-        }
-        .player-back:hover { color: var(--accent); }
-        .player-wrap {
-          background: #000;
-          border-radius: var(--radius-lg); overflow: hidden;
-          position: relative; aspect-ratio: 16/9;
-          box-shadow: var(--shadow); border: 1px solid var(--border);
-        }
-        .player-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+        /* ── Player ── */
+        .player-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
+        #yt-player { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .player-aspect { aspect-ratio: 16/9; position: relative; }
         .player-overlay {
-          position: absolute; inset: 0;
-          display: flex; flex-direction: column; justify-content: flex-end;
-          background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.2) 40%, transparent 70%);
-          opacity: 0; transition: opacity 0.3s; z-index: 5;
+          position: absolute; inset: 0; display: flex; flex-direction: column;
+          justify-content: flex-end; background: linear-gradient(transparent 40%, rgba(0,0,0,.85));
+          z-index: 10;
         }
-        .player-wrap:hover .player-overlay { opacity: 1; }
-        .player-controls { display: flex; align-items: center; gap: 10px; padding: 20px 24px; }
+        .controls { padding: 16px; }
+        .progress-bar {
+          width: 100%; height: 4px; background: rgba(255,255,255,.2);
+          border-radius: 2px; cursor: pointer; margin-bottom: 12px; position: relative;
+        }
+        .progress-fill { height: 100%; background: #e50914; border-radius: 2px; transition: width .1s; }
+        .controls-row { display: flex; align-items: center; gap: 12px; }
         .ctrl-btn {
-          background: rgba(255,255,255,0.1);
-          backdrop-filter: blur(8px);
-          border: 1px solid rgba(255,255,255,0.15);
-          color: white; border-radius: 10px;
-          padding: 10px 18px;
-          font-family: var(--font-body); font-weight: 600; font-size: 0.85rem;
-          cursor: pointer; transition: all 0.2s;
-          display: flex; align-items: center; gap: 6px;
+          background: none; border: none; cursor: pointer; color: #fff;
+          width: 36px; height: 36px; border-radius: 50%; display: flex;
+          align-items: center; justify-content: center; transition: background .15s; padding: 0;
         }
-        .ctrl-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
-        .ctrl-btn.play-pause { background: var(--accent); color: #000; border-color: var(--accent); padding: 10px 22px; }
-        .ctrl-btn.play-pause:hover { filter: brightness(1.1); }
-        .ctrl-spacer { flex: 1; }
-        .player-info {
-          padding: 0 24px 16px;
-          display: flex; align-items: center; justify-content: space-between;
-        }
-        .now-playing-label {
-          font-size: 0.7rem; text-transform: uppercase;
-          letter-spacing: 0.12em; color: var(--accent); font-weight: 600;
-        }
-        .now-playing-title { font-family: var(--font-head); font-weight: 700; font-size: 1.1rem; }
-        .progress-bar-wrap { padding: 0 24px 4px; display: flex; align-items: center; gap: 12px; }
-        .progress-track {
-          flex: 1; height: 3px;
-          background: rgba(255,255,255,0.2);
-          border-radius: 2px; cursor: pointer; position: relative;
-        }
-        .progress-fill {
-          height: 100%; background: var(--accent);
-          border-radius: 2px; transition: width 0.5s linear;
-        }
-        .time-label { font-size: 0.75rem; color: rgba(255,255,255,0.6); font-family: monospace; white-space: nowrap; }
-        .player-meta {
-          margin-top: 24px;
-          display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start;
-        }
-        @media (max-width: 600px) { .player-meta { grid-template-columns: 1fr; } }
-        .player-share-card {
-          background: var(--card); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); padding: 20px;
-        }
-        .share-label {
-          font-size: 0.75rem; text-transform: uppercase;
-          letter-spacing: 0.08em; color: var(--muted);
-          font-weight: 600; margin-bottom: 10px;
-        }
+        .ctrl-btn:hover { background: rgba(255,255,255,.15); }
+        .ctrl-btn svg { width: 20px; height: 20px; fill: currentColor; }
+        .time-display { font-size: 13px; color: rgba(255,255,255,.7); font-variant-numeric: tabular-nums; margin-left: auto; }
 
-        .toast-container {
-          position: fixed; bottom: 24px; right: 24px; z-index: 999;
-          display: flex; flex-direction: column; gap: 10px; pointer-events: none;
-        }
+        /* ── Toasts ── */
+        .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
         .toast {
-          background: var(--card); border: 1px solid var(--border);
-          border-radius: var(--radius); padding: 14px 20px;
-          font-size: 0.88rem; font-weight: 500;
-          display: flex; align-items: center; gap: 10px;
-          box-shadow: var(--shadow);
-          animation: toastIn 0.3s ease;
-          max-width: 320px;
+          padding: 12px 18px; border-radius: 8px; font-size: 14px; font-weight: 500;
+          color: #fff; animation: slideIn .2s ease;
+          box-shadow: 0 4px 20px rgba(0,0,0,.4);
         }
-        .toast.success { border-color: rgba(232,255,71,0.4); }
-        .toast.error   { border-color: rgba(255,92,92,0.4); }
-        .toast-icon { font-size: 1rem; }
-        @keyframes toastIn {
-          from { opacity: 0; transform: translateY(10px) scale(0.95); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
+        .toast.success { background: #1a3a1e; border: 1px solid #2d6a35; }
+        .toast.error { background: #3a1a1a; border: 1px solid #6a2d2d; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        .badge {
-          display: inline-block;
-          background: rgba(232,255,71,0.12);
-          color: var(--accent);
-          border: 1px solid rgba(232,255,71,0.25);
-          border-radius: 6px; padding: 3px 9px;
-          font-size: 0.72rem; font-weight: 600;
-          letter-spacing: 0.05em; text-transform: uppercase;
-        }
-
-        .divider { height: 1px; background: var(--border); margin: 36px 0; }
-
-        .stats-row { display: flex; gap: 24px; margin-bottom: 32px; flex-wrap: wrap; }
-        .stat-pill {
-          background: var(--card); border: 1px solid var(--border);
-          border-radius: var(--radius); padding: 12px 20px;
-          display: flex; align-items: center; gap: 10px;
-        }
-        .stat-num { font-family: var(--font-head); font-weight: 700; font-size: 1.4rem; color: var(--accent); }
-        .stat-desc { font-size: 0.8rem; color: var(--muted); }
-
-        @media (max-width: 768px) {
-          header { padding: 16px 20px; }
-          main   { padding: 24px 16px; }
-          .card  { padding: 20px; }
-          .player-controls { flex-wrap: wrap; gap: 8px; }
-          .nav-tabs { display: none; }
-        }
+        .empty-state { text-align: center; padding: 60px 20px; color: #555; }
+        .empty-state h3 { font-size: 18px; color: #666; margin-bottom: 8px; }
       `}</style>
 
       <div className="app">
-        {/* ─── Header ───────────────────────────────── */}
-        <header>
+        {/* ── HEADER ── */}
+        <header className="header">
           <div className="logo">
-            <div className="logo-dot" />
-            Edu<span>Stream</span>
+            <div className="logo-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+            <span className="logo-text">Edu<span>Stream</span></span>
           </div>
-          <div className="header-right">
-            {!authLoading && user && (
-              <div className="nav-tabs">
-                <button
-                  className={`nav-tab${view === "add" ? " active" : ""}`}
-                  onClick={() => setView("add")}
-                >
-                  + Añadir Video
-                </button>
-                <button
-                  className={`nav-tab${
-                    view === "library" || view === "player" ? " active" : ""
-                  }`}
-                  onClick={() => {
-                    setView("library");
-                    setFilter("");
-                  }}
-                >
-                  Biblioteca
-                </button>
-              </div>
-            )}
-
-            {!authLoading && user ? (
-              <div className="user-pill">
-                <div className="user-avatar">
-                  {username.charAt(0).toUpperCase()}
-                </div>
-                <span className="user-name">{username}</span>
-                <button className="sign-out-btn" onClick={handleSignOut}>
-                  Salir
-                </button>
-              </div>
-            ) : !authLoading ? (
-              <button
-                className="sign-in-btn"
-                onClick={() => router.push("/auth/login")}
-              >
-                Iniciar sesión
+          <nav className="nav">
+            <button className={`nav-btn${view === "add" ? " active" : ""}`} onClick={() => setView("add")}>
+              + Añadir
+            </button>
+            <button className={`nav-btn${view === "library" ? " active" : ""}`} onClick={() => setView("library")}>
+              Biblioteca ({db.length})
+            </button>
+            {currentEntry && (
+              <button className={`nav-btn${view === "player" ? " active" : ""}`} onClick={() => setView("player")}>
+                Reproduciendo
               </button>
-            ) : null}
-          </div>
+            )}
+          </nav>
         </header>
 
-        {/* ─── Main ─────────────────────────────────── */}
-        <main>
-
-          {/* ══ ADD VIDEO VIEW ═════════════════════════ */}
+        <main className="main">
+          {/* ── ADD VIDEO ── */}
           {view === "add" && (
-            <div>
-              <div className="section-label">Panel de administración</div>
-              <div className="section-title">Añadir nuevo video</div>
+            <div className="card">
+              <h2 className="card-title">Añadir nuevo video</h2>
+              <div className="form-group">
+                <label className="form-label">URL de YouTube</label>
+                <input
+                  className="form-input"
+                  type="url"
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  value={ytUrl}
+                  onChange={(e) => setYtUrl(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Título</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Título del video"
+                  value={ytTitle}
+                  onChange={(e) => setYtTitle(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Categoría (opcional)</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Ej: Matemáticas, Ciencias..."
+                  value={ytCategory}
+                  onChange={(e) => setYtCategory(e.target.value)}
+                />
+              </div>
+              <button className="btn btn-primary" onClick={handleAdd}>
+                Generar enlace
+              </button>
 
-              <div className="card">
-                {!user ? (
-                  <div className="auth-prompt">
-                    <div className="auth-prompt-title">
-                      Inicia sesión para continuar
-                    </div>
-                    <div className="auth-prompt-desc">
-                      Debes tener una cuenta para añadir videos y generar
-                      enlaces de plataforma personalizados.
-                    </div>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => router.push("/auth/login")}
-                    >
-                      Iniciar sesión o registrarse
+              {generatedLink && lastEntry && (
+                <div className="link-box">
+                  <h3>Enlace generado para &quot;{lastEntry.title}&quot;</h3>
+                  <div className="link-copy-row">
+                    <div className="link-text">{generatedLink}</div>
+                    <button className="btn btn-secondary" onClick={() => copyLink(generatedLink)}>
+                      Copiar
                     </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="input-row">
-                      <div className="input-group full">
-                        <label htmlFor="yt-url">Enlace de YouTube</label>
-                        <input
-                          id="yt-url"
-                          type="text"
-                          value={ytUrl}
-                          onChange={(e) => setYtUrl(e.target.value)}
-                          placeholder="https://www.youtube.com/watch?v=... o https://youtu.be/..."
-                        />
-                      </div>
-                      <div className="input-group">
-                        <label htmlFor="yt-title">Título del curso / clase</label>
-                        <input
-                          id="yt-title"
-                          type="text"
-                          value={ytTitle}
-                          onChange={(e) => setYtTitle(e.target.value)}
-                          placeholder="Ej: Introducción a JavaScript — Clase 1"
-                        />
-                      </div>
-                      <div className="input-group">
-                        <label htmlFor="yt-category">Categoría (opcional)</label>
-                        <input
-                          id="yt-category"
-                          type="text"
-                          value={ytCategory}
-                          onChange={(e) => setYtCategory(e.target.value)}
-                          placeholder="Ej: Programación, Diseño, Marketing…"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="actions">
-                      <button className="btn btn-primary" onClick={addVideo}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                        Añadir a la plataforma
-                      </button>
-                      <button className="btn btn-ghost" onClick={clearForm}>
-                        Limpiar
-                      </button>
-                    </div>
-
-                    {generatedLink && (
-                      <div className="link-result">
-                        <div className="link-result-label">
-                          Enlace de plataforma generado
-                        </div>
-                        <div className="link-copy-row">
-                          <div className="link-url">{generatedLink}</div>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() =>
-                              navigator.clipboard
-                                .writeText(generatedLink)
-                                .then(() => toast("Enlace copiado al portapapeles"))
-                            }
-                          >
-                            Copiar
-                          </button>
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => lastEntry && openPlayerEntry(lastEntry)}
-                          >
-                            Ver
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              <div className="divider" />
-
-              <div className="section-label">Información</div>
-              <div className="section-title">¿Cómo funciona?</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: "16px" }}>
-                {[
-                  {
-                    icon: "🔗",
-                    title: "Enlace propio",
-                    desc: "Cuando alguien abre el enlace compartido, ve tu plataforma — no el canal de YouTube directamente.",
-                  },
-                  {
-                    icon: "🎬",
-                    title: "Reproductor personalizado",
-                    desc: "Overlay con Play/Pause, retroceder 15s, avanzar 15s y pantalla completa.",
-                  },
-                  {
-                    icon: "🔒",
-                    title: "Videos privados",
-                    desc: "Funciona con videos no listados o privados de YouTube siempre que tengas el enlace directo.",
-                  },
-                  {
-                    icon: "☁️",
-                    title: "Guardado en la nube",
-                    desc: "Todos tus videos se guardan en Supabase, accesibles desde cualquier dispositivo.",
-                  },
-                ].map((item) => (
-                  <div className="card" key={item.title} style={{ padding: "20px" }}>
-                    <div style={{ fontSize: "1.6rem", marginBottom: "12px" }}>{item.icon}</div>
-                    <div style={{ fontFamily: "var(--font-head)", fontWeight: 600, marginBottom: "6px" }}>
-                      {item.title}
-                    </div>
-                    <div style={{ fontSize: "0.85rem", color: "var(--muted)", lineHeight: 1.6 }}>
-                      {item.desc}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ══ LIBRARY VIEW ═══════════════════════════ */}
-          {view === "library" && (
-            <div>
-              {!user ? (
-                <div className="card">
-                  <div className="auth-prompt">
-                    <div className="auth-prompt-title">Inicia sesión para ver tu biblioteca</div>
-                    <div className="auth-prompt-desc">
-                      Tus videos guardados aparecen aquí una vez que hayas iniciado sesión.
-                    </div>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => router.push("/auth/login")}
-                    >
-                      Iniciar sesión
+                    <button className="btn btn-primary" onClick={() => { setCurrentEntry(lastEntry); setView("player"); setTimeout(() => { if (ytReadyRef.current) createPlayer(lastEntry.ytId); else pendingVideoIdRef.current = lastEntry.ytId; }, 100); }}>
+                      Reproducir
                     </button>
                   </div>
                 </div>
-              ) : (
-                <>
-                  <div className="stats-row">
-                    <div className="stat-pill">
-                      <div className="stat-num">{db.length}</div>
-                      <div className="stat-desc">Videos totales</div>
-                    </div>
-                    <div className="stat-pill">
-                      <div className="stat-num">{categories}</div>
-                      <div className="stat-desc">Categorías</div>
-                    </div>
-                  </div>
-
-                  <div className="library-header">
-                    <div>
-                      <div className="section-label">Tu colección</div>
-                      <div className="section-title" style={{ marginBottom: 0 }}>
-                        Biblioteca de videos
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                      <div className="library-search">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: "var(--muted)", flexShrink: 0 }}>
-                          <circle cx="11" cy="11" r="8" />
-                          <path d="M21 21l-4.35-4.35" />
-                        </svg>
-                        <input
-                          type="text"
-                          placeholder="Buscar video…"
-                          value={filter}
-                          onChange={(e) => setFilter(e.target.value)}
-                        />
-                      </div>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setView("add")}>
-                        + Añadir
-                      </button>
-                    </div>
-                  </div>
-
-                  {dbLoading ? (
-                    <div className="empty-state">
-                      <div className="empty-text">Cargando biblioteca...</div>
-                    </div>
-                  ) : (
-                    <div className="library-grid">
-                      {filteredDb.length === 0 ? (
-                        <div className="empty-state" style={{ gridColumn: "1/-1" }}>
-                          <div style={{ fontSize: "3rem", marginBottom: "16px", opacity: 0.4 }}>
-                            🎬
-                          </div>
-                          <div className="empty-text">
-                            {filter ? "No se encontraron resultados." : "No hay videos aún. ¡Añade el primero!"}
-                          </div>
-                        </div>
-                      ) : (
-                        filteredDb.map((entry) => {
-                          const date = new Date(entry.added).toLocaleDateString("es-ES", {
-                            day: "2-digit", month: "short", year: "numeric",
-                          });
-                          return (
-                            <div className="video-card" key={entry.id} onClick={() => openPlayerEntry(entry)}>
-                              <div className="video-thumb">
-                                <Image
-                                  src={thumbUrl(entry.ytId)}
-                                  alt={entry.title}
-                                  width={320}
-                                  height={180}
-                                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                  crossOrigin="anonymous"
-                                />
-                                <div className="thumb-play">
-                                  <div className="thumb-play-icon">&#9654;</div>
-                                </div>
-                              </div>
-                              <div className="video-card-body">
-                                <div className="video-card-title">{entry.title}</div>
-                                <div className="video-card-meta">
-                                  <span>{date}</span>
-                                  <span className="badge">{entry.category}</span>
-                                </div>
-                              </div>
-                              <div className="video-card-actions" onClick={(e) => e.stopPropagation()}>
-                                <button className="btn btn-ghost btn-sm" onClick={() => copyLink(entry.id)}>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                  </svg>
-                                  Copiar enlace
-                                </button>
-                                <button className="btn btn-danger btn-sm" onClick={() => deleteVideo(entry.id)}>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <polyline points="3 6 5 6 21 6" />
-                                    <path d="M19 6l-1 14H6L5 6" />
-                                    <path d="M10 11v6M14 11v6M9 6V4h6v2" />
-                                  </svg>
-                                  Eliminar
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </>
               )}
             </div>
           )}
 
-          {/* ══ PLAYER VIEW ════════════════════════════ */}
+          {/* ── LIBRARY ── */}
+          {view === "library" && (
+            <div>
+              <input
+                className="search-bar"
+                placeholder="Buscar por título o categoría..."
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+              {filtered.length === 0 ? (
+                <div className="empty-state">
+                  <h3>{db.length === 0 ? "Tu biblioteca está vacía" : "Sin resultados"}</h3>
+                  <p>{db.length === 0 ? "Añade tu primer video desde la pestaña + Añadir" : "Prueba con otro término de búsqueda"}</p>
+                </div>
+              ) : (
+                <div className="video-grid">
+                  {filtered.map((v) => (
+                    <div key={v.id} className="video-card">
+                      <div className="thumb-wrap" onClick={() => playEntry(v)}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={thumbUrl(v.ytId)} alt={v.title} />
+                        <div className="play-overlay">
+                          <div className="play-circle">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="video-info">
+                        <div className="video-title">{v.title}</div>
+                        <div className="video-cat">{v.category}</div>
+                        <div className="video-actions">
+                          <button className="icon-btn" onClick={() => copyLink(platformLink(v.id))}>
+                            Copiar enlace
+                          </button>
+                          <button className="icon-btn del" onClick={() => handleDelete(v.id)}>
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── PLAYER ── */}
           {view === "player" && currentEntry && (
             <div>
-              <button className="player-back" onClick={backToLibrary}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M19 12H5M12 5l-7 7 7 7" />
-                </svg>
-                Volver a la biblioteca
-              </button>
-
-              <div className="player-wrap" id="player-wrap">
-                <div id="yt-player" />
-
-                <div className="player-overlay">
-                  <div className="progress-bar-wrap">
-                    <span className="time-label">{timeCurrent}</span>
-                    <div className="progress-track" onClick={seekFromBar}>
-                      <div className="progress-fill" style={{ width: `${progress}%` }} />
+              <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+                <button className="btn btn-secondary" onClick={() => setView("library")}>
+                  ← Volver
+                </button>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#fff" }}>{currentEntry.title}</h2>
+              </div>
+              <div className="player-container" id="player-wrapper">
+                <div className="player-aspect">
+                  <div id="yt-player" />
+                  <div className="player-overlay">
+                    <div className="controls">
+                      <div className="progress-bar" onClick={handleSeek}>
+                        <div className="progress-fill" style={{ width: `${progress}%` }} />
+                      </div>
+                      <div className="controls-row">
+                        {/* Skip back */}
+                        <button className="ctrl-btn" onClick={() => skip(-15)} title="-15s">
+                          <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="8.5" y="16" fontSize="5" fill="currentColor" fontWeight="bold">15</text></svg>
+                        </button>
+                        {/* Play/Pause */}
+                        <button className="ctrl-btn" onClick={togglePlay}>
+                          {isPlaying ? (
+                            <svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                          )}
+                        </button>
+                        {/* Skip forward */}
+                        <button className="ctrl-btn" onClick={() => skip(15)} title="+15s">
+                          <svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/><text x="8.5" y="16" fontSize="5" fill="currentColor" fontWeight="bold">15</text></svg>
+                        </button>
+                        {/* Mute */}
+                        <button className="ctrl-btn" onClick={toggleMute}>
+                          {isMuted ? (
+                            <svg viewBox="0 0 24 24"><path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                          )}
+                        </button>
+                        {/* Fullscreen */}
+                        <button className="ctrl-btn" onClick={enterFullscreen}>
+                          <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                        </button>
+                        <span className="time-display">{timeCurrent} / {timeTotal}</span>
+                      </div>
                     </div>
-                    <span className="time-label">{timeTotal}</span>
-                  </div>
-                  <div className="player-controls">
-                    <button className="ctrl-btn" onClick={() => skipTime(-15)} title="-15 segundos">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 .49-5" />
-                      </svg>
-                      -15s
-                    </button>
-                    <button className="ctrl-btn play-pause" onClick={togglePlay}>
-                      {isPlaying ? "⏸ Pausa" : "⏵ Play"}
-                    </button>
-                    <button className="ctrl-btn" onClick={() => skipTime(15)} title="+15 segundos">
-                      +15s
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M23 4v6h-6" /><path d="M20.49 15A9 9 0 1 1 20 10" />
-                      </svg>
-                    </button>
-                    <div className="ctrl-spacer" />
-                    <button className="ctrl-btn" onClick={toggleMute}>
-                      {isMuted ? "Silencio" : "Sonido"}
-                    </button>
-                    <button className="ctrl-btn" onClick={toggleFullscreen}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-                      </svg>
-                      Pantalla completa
-                    </button>
-                  </div>
-                  <div className="player-info">
-                    <div>
-                      <div className="now-playing-label">Reproduciendo ahora</div>
-                      <div className="now-playing-title">{currentEntry.title}</div>
-                    </div>
-                    <div className="badge">{currentEntry.category}</div>
                   </div>
                 </div>
               </div>
-
-              <div className="player-meta">
-                <div>
-                  <div className="section-label" style={{ marginTop: "24px" }}>
-                    Detalles del video
-                  </div>
-                  <div style={{ fontFamily: "var(--font-head)", fontSize: "1.4rem", fontWeight: 700, marginBottom: "8px" }}>
-                    {currentEntry.title}
-                  </div>
-                  <div style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
-                    Añadido el{" "}
-                    {new Date(currentEntry.added).toLocaleDateString("es-ES", {
-                      weekday: "long", day: "2-digit", month: "long", year: "numeric",
-                    })}
-                  </div>
-                </div>
-                <div className="player-share-card" style={{ minWidth: "260px" }}>
-                  <div className="share-label">Compartir enlace de plataforma</div>
-                  <div className="link-copy-row">
-                    <div className="link-url" style={{ fontSize: "0.8rem" }}>
-                      {platformLink(currentEntry.id)}
-                    </div>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() =>
-                        navigator.clipboard
-                          .writeText(platformLink(currentEntry.id))
-                          .then(() => toast("Enlace copiado"))
-                      }
-                    >
-                      Copiar
-                    </button>
-                  </div>
-                </div>
+              <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+                <button className="btn btn-secondary" onClick={() => copyLink(platformLink(currentEntry.id))}>
+                  Copiar enlace
+                </button>
               </div>
             </div>
           )}
         </main>
       </div>
 
-      {/* ─── Toast container ──────────────────────── */}
+      {/* ── TOASTS ── */}
       <div className="toast-container">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.type}`}>
-            <span className="toast-icon">{t.type === "success" ? "✓" : "✕"}</span>
-            {t.msg}
-          </div>
+          <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>
         ))}
       </div>
     </>

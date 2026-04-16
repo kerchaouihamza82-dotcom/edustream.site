@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import { addVideoAction, deleteVideoAction, listVideosAction } from "@/app/actions/videos";
 
 /* ─── Types ────────────────────────────────────────────────── */
 interface VideoEntry {
-  id: string;
-  ytId: string;
+  id: string;       // Supabase UUID
+  ytId: string;     // YouTube video ID
   title: string;
   category: string;
   added: string;
@@ -35,9 +36,9 @@ function thumbUrl(ytId: string) {
   return `https://img.youtube.com/vi/${ytId}/mqdefault.jpg`;
 }
 
-function platformLink(slug: string) {
+function platformLink(id: string) {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}?v=${slug}`;
+  return `${window.location.origin}/watch/${id}`;
 }
 
 function formatTime(s: number) {
@@ -138,9 +139,19 @@ export default function EduStreamApp() {
     []
   );
 
-  /* ─── Load localStorage ──────────────────── */
+  /* ─── Load videos from Supabase ─────────── */
   useEffect(() => {
-    setDb(loadFromStorage());
+    listVideosAction().then(({ videos }) => {
+      setDb(
+        videos.map((v) => ({
+          id: v.id,
+          ytId: v.youtube_id,
+          title: v.title,
+          category: v.slug ?? "",
+          added: v.created_at,
+        }))
+      );
+    });
   }, []);
 
   /* ─── Progress timer ─────────────────────── */
@@ -207,16 +218,14 @@ export default function EduStreamApp() {
     return () => { if (progressTimerRef.current) clearInterval(progressTimerRef.current); };
   }, [createPlayer]);
 
-  /* ─── Deep link ?v= ──────────────────────── */
+  /* ─── Deep link ?v= (legacy internal) ───── */
   useEffect(() => {
     const vid = searchParams.get("v");
     if (!vid) return;
-    const videos = loadFromStorage();
-    const found = videos.find((e) => e.id === vid);
+    const found = db.find((e) => e.id === vid);
     if (found) openPlayerEntry(found);
-    else toast("Video no encontrado", "error");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [db]);
 
   /* ─── Open player ────────────────────────── */
   function openPlayerEntry(entry: VideoEntry) {
@@ -228,22 +237,18 @@ export default function EduStreamApp() {
   }
 
   /* ─── Add video ──────────────────────────── */
-  function addVideo() {
+  async function addVideo() {
     if (!ytUrl.trim()) { toast("Introduce un enlace de YouTube", "error"); return; }
     const ytId = extractYouTubeId(ytUrl.trim());
     if (!ytId) { toast("Enlace de YouTube no válido", "error"); return; }
-    const current = loadFromStorage();
-    if (current.some((e) => e.ytId === ytId)) { toast("Este video ya existe en tu biblioteca", "error"); return; }
-    const entry: VideoEntry = {
-      id: genId(), ytId,
-      title: ytTitle.trim() || "Video sin título",
-      category: ytCategory.trim() || "Sin categoría",
-      added: new Date().toISOString(),
-    };
-    const updated = [entry, ...current];
-    saveToStorage(updated);
-    setDb(updated);
-    const link = platformLink(entry.id);
+    if (db.some((e) => e.ytId === ytId)) { toast("Este video ya existe en tu biblioteca", "error"); return; }
+    const title = ytTitle.trim() || "Video sin título";
+    const category = ytCategory.trim() || "Sin categoría";
+    const { error, id } = await addVideoAction({ ytId, title, category });
+    if (error || !id) { toast("Error al guardar el video", "error"); return; }
+    const entry: VideoEntry = { id, ytId, title, category, added: new Date().toISOString() };
+    setDb((prev) => [entry, ...prev]);
+    const link = platformLink(id);
     setGeneratedLink(link);
     setLastEntry(entry);
     toast("Video añadido correctamente");
@@ -254,9 +259,10 @@ export default function EduStreamApp() {
     setGeneratedLink(null); setLastEntry(null);
   }
 
-  function deleteVideo(id: string) {
-    const updated = db.filter((e) => e.id !== id);
-    saveToStorage(updated); setDb(updated);
+  async function deleteVideo(id: string) {
+    const { error } = await deleteVideoAction(id);
+    if (error) { toast("Error al eliminar el video", "error"); return; }
+    setDb((prev) => prev.filter((e) => e.id !== id));
     toast("Video eliminado");
   }
 

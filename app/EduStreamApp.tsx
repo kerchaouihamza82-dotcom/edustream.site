@@ -76,6 +76,20 @@ interface ToastItem {
 
 
 
+/* ─── YouTube player type ──────────────────────────────────── */
+interface YTPlayerInstance {
+  playVideo(): void;
+  pauseVideo(): void;
+  seekTo(seconds: number, allowSeekAhead: boolean): void;
+  mute(): void;
+  unMute(): void;
+  getCurrentTime(): number;
+  getDuration(): number;
+  getPlayerState(): number;
+  loadVideoById(id: string): void;
+  destroy(): void;
+}
+
 /* ══════════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════════ */

@@ -6,6 +6,8 @@ interface YTPlayerInstance {
   unMute(): void;
   getCurrentTime(): number;
   getDuration(): number;
+  getPlayerState(): number;
+  loadVideoById(id: string): void;
   destroy(): void;
 }
 

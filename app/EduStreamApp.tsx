@@ -74,18 +74,7 @@ interface ToastItem {
   type: "success" | "error";
 }
 
-interface YTPlayerInstance {
-  playVideo: () => void;
-  pauseVideo: () => void;
-  loadVideoById: (id: string) => void;
-  getCurrentTime: () => number;
-  getDuration: () => number;
-  seekTo: (t: number, allowSeekAhead: boolean) => void;
-  getPlayerState: () => number;
-  mute: () => void;
-  unMute: () => void;
-  destroy: () => void;
-}
+
 
 /* ══════════════════════════════════════════════════════════════
    COMPONENT

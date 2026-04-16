@@ -168,7 +168,8 @@ export default function EduStreamApp() {
     (ytId: string) => {
       const el = document.getElementById("yt-player");
       if (!el) return;
-      ytPlayerRef.current = new window.YT.Player("yt-player", {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ytPlayerRef.current = new (window as any).YT.Player("yt-player", {
         videoId: ytId,
         playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3 },
         events: {
@@ -178,9 +179,10 @@ export default function EduStreamApp() {
             startProgressTimer();
           },
           onStateChange: (e: { data: number }) => {
-            const playing = e.data === window.YT.PlayerState.PLAYING;
+            const YT = (window as any).YT;
+            const playing = e.data === YT.PlayerState.PLAYING;
             setIsPlaying(playing);
-            if (e.data === window.YT.PlayerState.ENDED) {
+            if (e.data === YT.PlayerState.ENDED) {
               if (progressTimerRef.current) clearInterval(progressTimerRef.current);
               setProgress(100);
             }
@@ -210,7 +212,7 @@ export default function EduStreamApp() {
     return () => { if (progressTimerRef.current) clearInterval(progressTimerRef.current); };
   }, [createPlayer]);
 
-  /* ─── Deep link ?v= (legacy internal) ───── */
+  /* ─── Deep link ?v= (legacy internal) ──���── */
   useEffect(() => {
     const vid = searchParams.get("v");
     if (!vid) return;
@@ -266,7 +268,7 @@ export default function EduStreamApp() {
   /* ─── Player controls ────────────────────── */
   function togglePlay() {
     const p = ytPlayerRef.current; if (!p) return;
-    if (p.getPlayerState() === window.YT.PlayerState.PLAYING) { p.pauseVideo(); setIsPlaying(false); }
+    if (p.getPlayerState() === (window as any).YT.PlayerState.PLAYING) { p.pauseVideo(); setIsPlaying(false); }
     else { p.playVideo(); setIsPlaying(true); }
   }
   function skipTime(secs: number) {

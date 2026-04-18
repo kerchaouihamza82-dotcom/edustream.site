@@ -13,6 +13,7 @@ export default function EmbedClient({ ytId, title }) {
   const timerRef     = useRef(null);
   const wrapRef      = useRef(null);
   const hideTimerRef = useRef(null);
+  const ytIdRef      = useRef(ytId); // stable ref so toggleFs can access it
 
   const [playing,      setPlaying]      = useState(false);
   const [muted,        setMuted]        = useState(false);
@@ -180,6 +181,8 @@ export default function EmbedClient({ ytId, title }) {
     } catch (_) {}
   };
 
+  const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   const toggleFs = () => {
     keepAlive();
     const el = wrapRef.current;
@@ -187,31 +190,80 @@ export default function EmbedClient({ ytId, title }) {
 
     const inFs = !!(
       document.fullscreenElement ||
-      document.webkitFullscreenElement ||
-      document.mozFullScreenElement
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement
     );
 
     if (inFs) {
-      // Exit fullscreen
-      (document.exitFullscreen ||
-        document.webkitExitFullscreen ||
-        document.mozCancelFullScreen
+      (
+        document.exitFullscreen ||
+        (document as any).webkitExitFullscreen ||
+        (document as any).mozCancelFullScreen
       )?.call(document);
-    } else {
-      // Enter fullscreen — try all browser APIs
-      const enter =
-        el.requestFullscreen ||
-        el.webkitRequestFullscreen ||
-        el.mozRequestFullScreen ||
-        el.msRequestFullscreen;
+      return;
+    }
 
-      if (enter) {
-        enter.call(el).catch(() => {});
-      } else {
-        // Last resort: postMessage to parent to expand iframe
-        try { window.parent.postMessage({ type: "edustream-fullscreen", value: true }, "*"); } catch (_) {}
-        setIsFs(true);
-      }
+    // iOS Safari: requestFullscreen is blocked inside iframes.
+    // Instead, grab the <video> element inside the YT iframe and call
+    // webkitEnterFullscreen() — this is the ONLY way that works on iOS.
+    if (isIOS()) {
+      try {
+        const ytIframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
+        // Try same-origin access (works if YT loads on same domain, usually doesn't, but worth trying)
+        const video = ytIframe?.contentDocument?.querySelector("video") as any;
+        if (video?.webkitEnterFullscreen) {
+          video.webkitEnterFullscreen();
+          setIsFs(true);
+          return;
+        }
+      } catch (_) {}
+
+      // If cross-origin blocked: reload the YT iframe with playsinline=0
+      // This forces iOS to open the native full-screen player
+      try {
+        const p = playerRef.current;
+        const currentTime = p?.getCurrentTime() || 0;
+        const wasPlaying = playing;
+
+        // Destroy current player and recreate with playsinline:0
+        if (p) { try { p.destroy(); } catch (_) {} }
+        playerRef.current = null;
+
+        const el2 = document.getElementById("yt-player");
+        if (el2) {
+          playerRef.current = new (window as any).YT.Player("yt-player", {
+            videoId: ytIdRef.current,
+            playerVars: {
+              modestbranding: 1, rel: 0, showinfo: 0,
+              controls: 0, fs: 1, iv_load_policy: 3,
+              playsinline: 0, // 0 = opens in native iOS fullscreen
+              start: Math.floor(currentTime),
+            },
+            events: {
+              onReady: (e: any) => {
+                if (wasPlaying) e.target.playVideo();
+                setIsFs(true);
+              },
+              onStateChange: (e: any) => {
+                const YT = (window as any).YT;
+                setPlaying(e.data === YT.PlayerState.PLAYING);
+              },
+            },
+          });
+        }
+      } catch (_) {}
+      return;
+    }
+
+    // Android / Desktop: standard requestFullscreen
+    const enter =
+      el.requestFullscreen ||
+      (el as any).webkitRequestFullscreen ||
+      (el as any).mozRequestFullScreen ||
+      (el as any).msRequestFullscreen;
+
+    if (enter) {
+      enter.call(el).catch(() => {});
     }
   };
 

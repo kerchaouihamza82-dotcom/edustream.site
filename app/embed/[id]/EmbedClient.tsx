@@ -138,9 +138,20 @@ export default function EmbedClient({ ytId, title }) {
     } catch (_) {}
   };
   const toggleFs = () => {
+    // iOS Safari: use the native <video> element inside the YT iframe
+    try {
+      const iframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
+      const video  = iframe?.contentDocument?.querySelector("video") as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+      if (video?.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
+    } catch (_) {}
+    // Standard fullscreen (Android Chrome, desktop)
     const el = wrapRef.current;
     if (!el) return;
-    document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen?.();
+    if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
+      (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document);
+    } else {
+      (el.requestFullscreen || (el as any).webkitRequestFullscreen)?.call(el);
+    }
   };
   const seekBar = (e) => {
     const p = playerRef.current;
@@ -177,14 +188,25 @@ export default function EmbedClient({ ytId, title }) {
       {/* div vacío — YouTube IFrame API lo reemplaza con el iframe controlado */}
       <div id="yt-player" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
 
-      {/* overlay de controles */}
+      {/* overlay de controles con fade + slide-up */}
       <div style={{ position: "absolute", inset: 0, zIndex: 10, display: "flex", flexDirection: "column",
                     justifyContent: "flex-end", pointerEvents: "none",
                     opacity: showControls ? 1 : 0,
-                    transition: "opacity .3s ease",
-                    background: showControls
-                      ? "linear-gradient(to top, rgba(0,0,0,.85) 0%, rgba(0,0,0,.15) 50%, transparent 70%)"
-                      : "transparent" }}>
+                    transition: "opacity .35s ease" }}>
+
+        {/* gradiente animado desde abajo */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "linear-gradient(to top, rgba(0,0,0,.9) 0%, rgba(0,0,0,.3) 40%, transparent 70%)",
+          opacity: showControls ? 1 : 0,
+          transform: showControls ? "translateY(0)" : "translateY(12px)",
+          transition: "opacity .35s ease, transform .35s ease",
+          pointerEvents: "none",
+        }} />
+
+        <div style={{ position: "relative", zIndex: 1,
+                      transform: showControls ? "translateY(0)" : "translateY(12px)",
+                      transition: "transform .35s ease" }}>
 
         <div style={{ padding: isMobile ? "0 10px 2px" : "0 16px 4px", color: "#fff",
                       fontSize: isMobile ? ".78rem" : ".85rem", fontWeight: 700,
@@ -215,7 +237,8 @@ export default function EmbedClient({ ytId, title }) {
           <button style={btn(false)} onClick={toggleMute}>{muted ? "🔇" : "🔊"}</button>
           <button style={btn(false)} onClick={toggleFs}>⛶</button>
         </div>
-      </div>
+        </div>{/* end slide wrapper */}
+      </div>{/* end overlay */}
     </div>
   );
 }

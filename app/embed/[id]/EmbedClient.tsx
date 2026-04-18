@@ -26,40 +26,35 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
-  const HIDE_DELAY = 3000; // 3s of inactivity before hiding
+  const HIDE_DELAY = 5000; // 5s — enough time to interact
 
-  // Resets the auto-hide timer — called on every interaction
-  const scheduleHide = () => {
+  // Desktop: show on mouse move, reset timer on any interaction
+  const revealControls = () => {
+    setShowControls(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
   };
 
-  // Desktop: reveal on mouse move and reset timer
-  const revealControls = () => {
-    setShowControls(true);
-    scheduleHide();
-  };
-
-  // Every button click keeps controls visible and resets the timer
+  // Called on every button click to keep controls visible while interacting
   const keepAlive = () => {
-    setShowControls(true);
-    scheduleHide();
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
   };
 
-  // Mobile: tap on video area toggles; tap on button keeps visible
+  // Mobile: first tap shows, second tap (outside buttons) hides
   const handleTouch = (e) => {
-    const tag = (e.target as HTMLElement).tagName.toUpperCase();
-    const isInteractiveElement = ["BUTTON", "SVG", "PATH", "RECT", "POLYGON", "LINE", "SPAN", "DIV"].includes(tag)
-      && (e.target as HTMLElement).closest("button");
-    if (isInteractiveElement) {
-      // Tapped a button — keep controls visible
+    // Button tap — keep controls visible, reset timer
+    const tag = e.target.tagName;
+    if (tag === "BUTTON" || tag === "svg" || tag === "path" || tag === "rect" || tag === "polygon" || tag === "line") {
       keepAlive();
       return;
     }
-    // Tapped video area — toggle controls
+    // Area tap — toggle
     setShowControls((prev) => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      if (!prev) scheduleHide();
+      if (!prev) {
+        hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+      }
       return !prev;
     });
   };
@@ -91,7 +86,7 @@ export default function EmbedClient({ ytId, title }) {
         videoId: ytId,
         // Mobile: controls:1 so YouTube manages its own native fullscreen via the OS
         // Desktop: controls:0 so our custom controls overlay takes over
-        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 1, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
+        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: mobile ? 1 : 0, fs: 1, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
             if (mobile) {
@@ -168,26 +163,15 @@ export default function EmbedClient({ ytId, title }) {
     keepAlive();
     const el = wrapRef.current;
     if (!el) return;
-    const isFs = !!(
-      document.fullscreenElement ||
-      (document as any).webkitFullscreenElement ||
-      (document as any).mozFullScreenElement
-    );
+    const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
     if (isFs) {
-      // Exit fullscreen — all browsers
-      (document.exitFullscreen ||
-        (document as any).webkitExitFullscreen ||
-        (document as any).mozCancelFullScreen ||
-        (document as any).msExitFullscreen
-      )?.call(document);
+      const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
+      if (exit) exit.call(document);
     } else {
-      // Enter fullscreen — try all APIs including webkit for iOS/Android
-      const enter =
-        el.requestFullscreen ||
-        (el as any).webkitRequestFullscreen ||
-        (el as any).webkitEnterFullscreen ||
-        (el as any).mozRequestFullScreen ||
-        (el as any).msRequestFullscreen;
+      const enter = el.requestFullscreen
+        || (el as any).webkitRequestFullscreen
+        || (el as any).mozRequestFullScreen
+        || (el as any).msRequestFullscreen;
       if (enter) enter.call(el);
     }
   };
@@ -300,10 +284,12 @@ export default function EmbedClient({ ytId, title }) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
             )}
           </button>
-          {/* fullscreen — visible on all devices */}
-          <button style={btn(false)} onClick={toggleFs}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-          </button>
+          {/* fullscreen — desktop only; mobile uses YouTube native fullscreen */}
+          {!isMobile && (
+            <button style={btn(false)} onClick={toggleFs}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+            </button>
+          )}
         </div>
         </div>{/* end slide wrapper */}
       </div>{/* end overlay */}

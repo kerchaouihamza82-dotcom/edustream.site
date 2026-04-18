@@ -21,5 +21,5 @@ export default async function EmbedPage({ params }: { params: Promise<{ id: stri
 
   if (!video) notFound();
 
-  return <EmbedClient ytId={video.youtube_id} title={video.title} />;
+  return <EmbedClient ytId={video.youtube_id} title={video.title} embedId={id} />;
 }

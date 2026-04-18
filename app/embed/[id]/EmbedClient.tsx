@@ -13,11 +13,19 @@ export default function EmbedClient({ ytId, title }) {
   const timerRef  = useRef(null);
   const wrapRef   = useRef(null);
 
-  const [playing,  setPlaying]  = useState(false);
-  const [muted,    setMuted]    = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [timeCur,  setTimeCur]  = useState("0:00");
-  const [timeTot,  setTimeTot]  = useState("0:00");
+  const [playing,      setPlaying]      = useState(false);
+  const [muted,        setMuted]        = useState(false);
+  const [progress,     setProgress]     = useState(0);
+  const [timeCur,      setTimeCur]      = useState("0:00");
+  const [timeTot,      setTimeTot]      = useState("0:00");
+  const [showControls, setShowControls] = useState(false);
+  const hideTimerRef = useRef(null);
+
+  const revealControls = () => {
+    setShowControls(true);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+  };
 
   useEffect(() => {
     /* -- exactly the same as EduStreamApp -- */
@@ -136,8 +144,10 @@ export default function EmbedClient({ ytId, title }) {
   return (
     <div
       ref={wrapRef}
+      onMouseMove={revealControls}
+      onTouchStart={revealControls}
       style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden",
-               fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
+               fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", cursor: showControls ? "default" : "none" }}
     >
       {/* div vacío — YouTube IFrame API lo reemplaza con el iframe controlado */}
       <div id="yt-player" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
@@ -145,7 +155,11 @@ export default function EmbedClient({ ytId, title }) {
       {/* overlay de controles */}
       <div style={{ position: "absolute", inset: 0, zIndex: 10, display: "flex", flexDirection: "column",
                     justifyContent: "flex-end", pointerEvents: "none",
-                    background: "linear-gradient(to top, rgba(0,0,0,.9) 0%, rgba(0,0,0,.05) 40%, transparent 65%)" }}>
+                    opacity: showControls ? 1 : 0,
+                    transition: "opacity .3s ease",
+                    background: showControls
+                      ? "linear-gradient(to top, rgba(0,0,0,.85) 0%, rgba(0,0,0,.15) 50%, transparent 70%)"
+                      : "transparent" }}>
 
         <div style={{ padding: "0 16px 4px", color: "#fff", fontSize: ".85rem", fontWeight: 700,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pointerEvents: "none" }}>

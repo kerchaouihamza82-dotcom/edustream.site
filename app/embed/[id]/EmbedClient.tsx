@@ -86,7 +86,7 @@ export default function EmbedClient({ ytId, title }) {
         videoId: ytId,
         // Mobile: controls:1 so YouTube manages its own native fullscreen via the OS
         // Desktop: controls:0 so our custom controls overlay takes over
-        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: mobile ? 1 : 0, fs: 1, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
+        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 1, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
             if (mobile) {
@@ -284,12 +284,10 @@ export default function EmbedClient({ ytId, title }) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
             )}
           </button>
-          {/* fullscreen — desktop only; mobile uses YouTube native fullscreen */}
-          {!isMobile && (
-            <button style={btn(false)} onClick={toggleFs}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-            </button>
-          )}
+          {/* fullscreen — visible on all devices */}
+          <button style={btn(false)} onClick={toggleFs}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          </button>
         </div>
         </div>{/* end slide wrapper */}
       </div>{/* end overlay */}

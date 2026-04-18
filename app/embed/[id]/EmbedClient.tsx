@@ -159,6 +159,18 @@ export default function EmbedClient({ ytId, title }) {
   };
   const toggleFs = () => {
     keepAlive();
+    // Mobile (iOS Safari / Android): use webkitEnterFullscreen on the <video> inside the YT iframe
+    if (isMobile) {
+      try {
+        const iframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
+        const video  = (iframe?.contentDocument || iframe?.contentWindow?.document)?.querySelector("video") as any;
+        if (video) {
+          if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
+          if (video.requestFullscreen)     { video.requestFullscreen();     return; }
+        }
+      } catch (_) {}
+    }
+    // Desktop standard fullscreen
     const el = wrapRef.current;
     if (!el) return;
     const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
@@ -257,15 +269,13 @@ export default function EmbedClient({ ytId, title }) {
             15s
           </button>
           {/* play / pause */}
-          <button style={btn(true)} onClick={togglePlay}>
+          <button style={{ ...btn(true), display: "inline-flex", alignItems: "center", gap: 4 }} onClick={togglePlay}>
             {playing ? (
-              // pause: two vertical bars
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
             ) : (
-              // play: triangle
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><polygon points="5,3 19,12 5,21"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
             )}
-            {playing ? "Pausa" : "Play"}
+            <span>{playing ? "Pausa" : "Play"}</span>
           </button>
           {/* +15s */}
           <button style={btn(false)} onClick={() => skip(15)}>

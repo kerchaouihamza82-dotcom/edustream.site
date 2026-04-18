@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { loginAction } from "./action";
+import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -12,13 +13,16 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     const formData = new FormData(e.currentTarget);
-    const result = await loginAction(formData);
-    if (result?.ok) {
-      window.location.href = "/";
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      setError("Email o contraseña incorrectos.");
+      setLoading(false);
       return;
     }
-    setError(result?.error ?? "Error inesperado.");
-    setLoading(false);
+    window.location.href = "/library";
   }
 
   return (
@@ -172,6 +176,13 @@ export default function LoginPage() {
               {loading ? "Verificando..." : "Entrar"}
             </button>
           </form>
+
+          <p style={{ marginTop: 20, textAlign: "center", fontSize: "0.82rem", color: "#666", fontFamily: "sans-serif" }}>
+            ¿No tienes cuenta?{" "}
+            <Link href="/auth/register" style={{ color: "#e8ff47", textDecoration: "none", fontWeight: 600 }}>
+              Regístrate
+            </Link>
+          </p>
         </div>
       </div>
     </>

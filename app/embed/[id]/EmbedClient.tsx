@@ -165,7 +165,12 @@ export default function EmbedClient({ ytId, title }) {
 
   const toggleFs = () => {
     keepAlive();
-    setIsFs((prev) => !prev);
+    setIsFs((prev) => {
+      const next = !prev;
+      // Tell the parent page to expand/collapse the iframe
+      try { window.parent.postMessage({ type: "edustream-fullscreen", value: next }, "*"); } catch (_) {}
+      return next;
+    });
   };
 
   const seekBar = (e) => {

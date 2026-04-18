@@ -26,10 +26,27 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
+  // Desktop: show on mouse move, auto-hide after 3s
   const revealControls = () => {
     setShowControls(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+  };
+
+  // Mobile: tap toggles controls on/off (like YouTube)
+  const handleTouch = (e) => {
+    // If tapping a button directly, don't toggle — let the button handle it
+    if (e.target.tagName === "BUTTON") return;
+    setShowControls((prev) => {
+      if (!prev) {
+        // Showing — auto-hide after 3s if no further interaction
+        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+      } else {
+        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      }
+      return !prev;
+    });
   };
 
   useEffect(() => {
@@ -152,8 +169,8 @@ export default function EmbedClient({ ytId, title }) {
   return (
     <div
       ref={wrapRef}
-      onMouseMove={revealControls}
-      onTouchStart={revealControls}
+      onMouseMove={isMobile ? undefined : revealControls}
+      onTouchStart={isMobile ? handleTouch : undefined}
       style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden",
                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", cursor: showControls ? "default" : "none" }}
     >

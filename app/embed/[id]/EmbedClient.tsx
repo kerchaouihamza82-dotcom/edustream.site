@@ -13,7 +13,7 @@ export default function EmbedClient({ ytId, title }) {
   const timerRef     = useRef(null);
   const wrapRef      = useRef(null);
   const hideTimerRef = useRef(null);
-  const ytIdRef      = useRef(ytId); // stable ref so toggleFs can access it
+
 
   const [playing,      setPlaying]      = useState(false);
   const [muted,        setMuted]        = useState(false);
@@ -28,25 +28,7 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
-  // Listen for fullscreen change events to sync isFs state
-  useEffect(() => {
-    const onFsChange = () => {
-      const inFs = !!(
-        document.fullscreenElement ||
-        document.webkitFullscreenElement ||
-        document.mozFullScreenElement
-      );
-      setIsFs(inFs);
-    };
-    document.addEventListener("fullscreenchange", onFsChange);
-    document.addEventListener("webkitfullscreenchange", onFsChange);
-    document.addEventListener("mozfullscreenchange", onFsChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", onFsChange);
-      document.removeEventListener("webkitfullscreenchange", onFsChange);
-      document.removeEventListener("mozfullscreenchange", onFsChange);
-    };
-  }, []);
+
 
   const HIDE_DELAY = 3000;
 
@@ -181,90 +163,9 @@ export default function EmbedClient({ ytId, title }) {
     } catch (_) {}
   };
 
-  const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
-
   const toggleFs = () => {
     keepAlive();
-    const el = wrapRef.current;
-    if (!el) return;
-
-    const inFs = !!(
-      document.fullscreenElement ||
-      (document as any).webkitFullscreenElement ||
-      (document as any).mozFullScreenElement
-    );
-
-    if (inFs) {
-      (
-        document.exitFullscreen ||
-        (document as any).webkitExitFullscreen ||
-        (document as any).mozCancelFullScreen
-      )?.call(document);
-      return;
-    }
-
-    // iOS Safari: requestFullscreen is blocked inside iframes.
-    // Instead, grab the <video> element inside the YT iframe and call
-    // webkitEnterFullscreen() — this is the ONLY way that works on iOS.
-    if (isIOS()) {
-      try {
-        const ytIframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
-        // Try same-origin access (works if YT loads on same domain, usually doesn't, but worth trying)
-        const video = ytIframe?.contentDocument?.querySelector("video") as any;
-        if (video?.webkitEnterFullscreen) {
-          video.webkitEnterFullscreen();
-          setIsFs(true);
-          return;
-        }
-      } catch (_) {}
-
-      // If cross-origin blocked: reload the YT iframe with playsinline=0
-      // This forces iOS to open the native full-screen player
-      try {
-        const p = playerRef.current;
-        const currentTime = p?.getCurrentTime() || 0;
-        const wasPlaying = playing;
-
-        // Destroy current player and recreate with playsinline:0
-        if (p) { try { p.destroy(); } catch (_) {} }
-        playerRef.current = null;
-
-        const el2 = document.getElementById("yt-player");
-        if (el2) {
-          playerRef.current = new (window as any).YT.Player("yt-player", {
-            videoId: ytIdRef.current,
-            playerVars: {
-              modestbranding: 1, rel: 0, showinfo: 0,
-              controls: 0, fs: 1, iv_load_policy: 3,
-              playsinline: 0, // 0 = opens in native iOS fullscreen
-              start: Math.floor(currentTime),
-            },
-            events: {
-              onReady: (e: any) => {
-                if (wasPlaying) e.target.playVideo();
-                setIsFs(true);
-              },
-              onStateChange: (e: any) => {
-                const YT = (window as any).YT;
-                setPlaying(e.data === YT.PlayerState.PLAYING);
-              },
-            },
-          });
-        }
-      } catch (_) {}
-      return;
-    }
-
-    // Android / Desktop: standard requestFullscreen
-    const enter =
-      el.requestFullscreen ||
-      (el as any).webkitRequestFullscreen ||
-      (el as any).mozRequestFullScreen ||
-      (el as any).msRequestFullscreen;
-
-    if (enter) {
-      enter.call(el).catch(() => {});
-    }
+    setIsFs((prev) => !prev);
   };
 
   const seekBar = (e) => {
@@ -301,9 +202,11 @@ export default function EmbedClient({ ytId, title }) {
       onTouchStart={isMobile ? handleTouch : undefined}
       style={{
         position: "fixed",
-        inset: 0,
-        width: "100%",
-        height: "100%",
+        top: 0,
+        left: 0,
+        width: isFs ? "100vw" : "100%",
+        height: isFs ? "100vh" : "100%",
+        zIndex: isFs ? 999999 : 0,
         background: "#000",
         overflow: "hidden",
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",

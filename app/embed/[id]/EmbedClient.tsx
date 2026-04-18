@@ -84,7 +84,7 @@ export default function EmbedClient({ ytId, title }) {
       const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
       playerRef.current = new (window).YT.Player("yt-player", {
         videoId: ytId,
-        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
+        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 1, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
             if (mobile) {
@@ -166,7 +166,10 @@ export default function EmbedClient({ ytId, title }) {
       const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
       if (exit) exit.call(document);
     } else {
-      const enter = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen || (el as any).msRequestFullscreen;
+      const enter = el.requestFullscreen
+        || (el as any).webkitRequestFullscreen
+        || (el as any).mozRequestFullScreen
+        || (el as any).msRequestFullscreen;
       if (enter) enter.call(el);
     }
   };
@@ -257,15 +260,13 @@ export default function EmbedClient({ ytId, title }) {
             15s
           </button>
           {/* play / pause */}
-          <button style={btn(true)} onClick={togglePlay}>
+          <button style={{ ...btn(true), display: "inline-flex", alignItems: "center", gap: 4 }} onClick={togglePlay}>
             {playing ? (
-              // pause: two vertical bars
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
             ) : (
-              // play: triangle
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><polygon points="5,3 19,12 5,21"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
             )}
-            {playing ? "Pausa" : "Play"}
+            <span>{playing ? "Pausa" : "Play"}</span>
           </button>
           {/* +15s */}
           <button style={btn(false)} onClick={() => skip(15)}>

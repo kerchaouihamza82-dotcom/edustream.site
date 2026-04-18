@@ -138,9 +138,20 @@ export default function EmbedClient({ ytId, title }) {
     } catch (_) {}
   };
   const toggleFs = () => {
+    // iOS Safari: use the native <video> element inside the YT iframe
+    try {
+      const iframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
+      const video  = iframe?.contentDocument?.querySelector("video") as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+      if (video?.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
+    } catch (_) {}
+    // Standard fullscreen (Android Chrome, desktop)
     const el = wrapRef.current;
     if (!el) return;
-    document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen?.();
+    if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
+      (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document);
+    } else {
+      (el.requestFullscreen || (el as any).webkitRequestFullscreen)?.call(el);
+    }
   };
   const seekBar = (e) => {
     const p = playerRef.current;
@@ -177,14 +188,25 @@ export default function EmbedClient({ ytId, title }) {
       {/* div vacío — YouTube IFrame API lo reemplaza con el iframe controlado */}
       <div id="yt-player" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
 
-      {/* overlay de controles */}
+      {/* overlay de controles con fade + slide-up */}
       <div style={{ position: "absolute", inset: 0, zIndex: 10, display: "flex", flexDirection: "column",
                     justifyContent: "flex-end", pointerEvents: "none",
                     opacity: showControls ? 1 : 0,
-                    transition: "opacity .3s ease",
-                    background: showControls
-                      ? "linear-gradient(to top, rgba(0,0,0,.85) 0%, rgba(0,0,0,.15) 50%, transparent 70%)"
-                      : "transparent" }}>
+                    transition: "opacity .35s ease" }}>
+
+        {/* gradiente animado desde abajo */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "linear-gradient(to top, rgba(0,0,0,.97) 0%, rgba(0,0,0,.75) 35%, rgba(0,0,0,.2) 60%, transparent 80%)",
+          opacity: showControls ? 1 : 0,
+          transform: showControls ? "translateY(0)" : "translateY(12px)",
+          transition: "opacity .35s ease, transform .35s ease",
+          pointerEvents: "none",
+        }} />
+
+        <div style={{ position: "relative", zIndex: 1,
+                      transform: showControls ? "translateY(0)" : "translateY(12px)",
+                      transition: "transform .35s ease" }}>
 
         <div style={{ padding: isMobile ? "0 10px 2px" : "0 16px 4px", color: "#fff",
                       fontSize: isMobile ? ".78rem" : ".85rem", fontWeight: 700,
@@ -208,14 +230,43 @@ export default function EmbedClient({ ytId, title }) {
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
                       padding: isMobile ? "0 10px 10px" : "0 16px 16px", pointerEvents: "auto",
                       flexWrap: "nowrap", overflow: "hidden" }}>
-          <button style={btn(false)} onClick={() => skip(-15)}>−15s</button>
-          <button style={btn(true)}  onClick={togglePlay}>{playing ? "⏸ Pausa" : "▶ Play"}</button>
-          <button style={btn(false)} onClick={() => skip(15)}>+15s</button>
+          {/* -15s */}
+          <button style={btn(false)} onClick={() => skip(-15)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 3, verticalAlign: "middle" }}><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-5"/></svg>
+            15s
+          </button>
+          {/* play / pause */}
+          <button style={btn(true)} onClick={togglePlay}>
+            {playing ? (
+              // pause: two vertical bars
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
+            ) : (
+              // play: triangle
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><polygon points="5,3 19,12 5,21"/></svg>
+            )}
+            {playing ? "Pausa" : "Play"}
+          </button>
+          {/* +15s */}
+          <button style={btn(false)} onClick={() => skip(15)}>
+            15s
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginLeft: 3, verticalAlign: "middle" }}><path d="M23 4v6h-6"/><path d="M20.49 15A9 9 0 1 1 20 10"/></svg>
+          </button>
           <div style={{ flex: 1 }} />
-          <button style={btn(false)} onClick={toggleMute}>{muted ? "🔇" : "🔊"}</button>
-          <button style={btn(false)} onClick={toggleFs}>⛶</button>
+          {/* mute / unmute */}
+          <button style={btn(false)} onClick={toggleMute}>
+            {muted ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+            )}
+          </button>
+          {/* fullscreen */}
+          <button style={btn(false)} onClick={toggleFs}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          </button>
         </div>
-      </div>
+        </div>{/* end slide wrapper */}
+      </div>{/* end overlay */}
     </div>
   );
 }

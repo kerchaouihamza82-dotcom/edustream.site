@@ -160,7 +160,22 @@ export default function EmbedClient({ ytId, title }) {
   };
   const toggleFs = () => {
     keepAlive();
-    setIsFs((prev) => !prev);
+    setIsFs((prev) => {
+      const next = !prev;
+      // Communicate to parent iframe to expand/collapse
+      try {
+        window.parent.postMessage({ type: "edustream-fullscreen", value: next }, "*");
+      } catch (_) {}
+      // Also manipulate html/body so the fixed container truly covers the screen
+      if (next) {
+        document.documentElement.style.cssText = "position:fixed;inset:0;width:100%;height:100%;overflow:hidden;";
+        document.body.style.cssText = "position:fixed;inset:0;width:100%;height:100%;overflow:hidden;margin:0;padding:0;";
+      } else {
+        document.documentElement.style.cssText = "";
+        document.body.style.cssText = "";
+      }
+      return next;
+    });
   };
   const seekBar = (e) => {
     keepAlive();
@@ -190,11 +205,16 @@ export default function EmbedClient({ ytId, title }) {
     flexShrink: 0,
   });
 
-  const playerStyle = isFs
-    ? { position: "fixed" as const, inset: 0, zIndex: 9999, background: "#000", overflow: "hidden",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }
-    : { position: "fixed" as const, inset: 0, background: "#000", overflow: "hidden",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" };
+  const playerStyle = {
+    position: "fixed" as const,
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    zIndex: isFs ? 99999 : 0,
+    background: "#000",
+    overflow: "hidden",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  };
 
   return (
     <div

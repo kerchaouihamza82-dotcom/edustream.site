@@ -84,7 +84,7 @@ export default function EmbedClient({ ytId, title }) {
       const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
       playerRef.current = new (window).YT.Player("yt-player", {
         videoId: ytId,
-        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 1, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
+        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
             if (mobile) {
@@ -159,6 +159,18 @@ export default function EmbedClient({ ytId, title }) {
   };
   const toggleFs = () => {
     keepAlive();
+    // Mobile (iOS Safari / Android): use webkitEnterFullscreen on the <video> inside the YT iframe
+    if (isMobile) {
+      try {
+        const iframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
+        const video  = (iframe?.contentDocument || iframe?.contentWindow?.document)?.querySelector("video") as any;
+        if (video) {
+          if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
+          if (video.requestFullscreen)     { video.requestFullscreen();     return; }
+        }
+      } catch (_) {}
+    }
+    // Desktop standard fullscreen
     const el = wrapRef.current;
     if (!el) return;
     const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
@@ -166,10 +178,7 @@ export default function EmbedClient({ ytId, title }) {
       const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
       if (exit) exit.call(document);
     } else {
-      const enter = el.requestFullscreen
-        || (el as any).webkitRequestFullscreen
-        || (el as any).mozRequestFullScreen
-        || (el as any).msRequestFullscreen;
+      const enter = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen || (el as any).msRequestFullscreen;
       if (enter) enter.call(el);
     }
   };

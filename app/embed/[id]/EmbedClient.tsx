@@ -21,6 +21,7 @@ export default function EmbedClient({ ytId, title }) {
   const [timeTot,      setTimeTot]      = useState("0:00");
   const [showControls, setShowControls] = useState(false);
   const [isMobile,     setIsMobile]     = useState(false);
+  const [isFs,         setIsFs]         = useState(false);
 
   useEffect(() => {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
@@ -159,28 +160,7 @@ export default function EmbedClient({ ytId, title }) {
   };
   const toggleFs = () => {
     keepAlive();
-    // Mobile (iOS Safari / Android): use webkitEnterFullscreen on the <video> inside the YT iframe
-    if (isMobile) {
-      try {
-        const iframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
-        const video  = (iframe?.contentDocument || iframe?.contentWindow?.document)?.querySelector("video") as any;
-        if (video) {
-          if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
-          if (video.requestFullscreen)     { video.requestFullscreen();     return; }
-        }
-      } catch (_) {}
-    }
-    // Desktop standard fullscreen
-    const el = wrapRef.current;
-    if (!el) return;
-    const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
-    if (isFs) {
-      const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
-      if (exit) exit.call(document);
-    } else {
-      const enter = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen || (el as any).msRequestFullscreen;
-      if (enter) enter.call(el);
-    }
+    setIsFs((prev) => !prev);
   };
   const seekBar = (e) => {
     keepAlive();
@@ -210,24 +190,29 @@ export default function EmbedClient({ ytId, title }) {
     flexShrink: 0,
   });
 
+  const playerStyle = isFs
+    ? { position: "fixed" as const, inset: 0, zIndex: 9999, background: "#000", overflow: "hidden",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }
+    : { position: "fixed" as const, inset: 0, background: "#000", overflow: "hidden",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" };
+
   return (
     <div
       ref={wrapRef}
       onMouseMove={isMobile ? undefined : revealControls}
       onTouchStart={isMobile ? handleTouch : undefined}
-      style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden",
-               fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
+      style={playerStyle}
     >
-      {/* div vacío — YouTube IFrame API lo reemplaza con el iframe controlado */}
+      {/* YouTube player div */}
       <div id="yt-player" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
 
-      {/* overlay de controles con fade + slide-up */}
+      {/* Controls overlay — fade + slide-up */}
       <div style={{ position: "absolute", inset: 0, zIndex: 10, display: "flex", flexDirection: "column",
                     justifyContent: "flex-end", pointerEvents: "none",
                     opacity: showControls ? 1 : 0,
                     transition: "opacity .35s ease" }}>
 
-        {/* gradiente animado desde abajo */}
+        {/* dark gradient from bottom */}
         <div style={{
           position: "absolute", inset: 0,
           background: "linear-gradient(to top, rgba(0,0,0,.97) 0%, rgba(0,0,0,.75) 35%, rgba(0,0,0,.2) 60%, transparent 80%)",
@@ -237,67 +222,71 @@ export default function EmbedClient({ ytId, title }) {
           pointerEvents: "none",
         }} />
 
-        <div style={{ position: "relative", zIndex: 1,
-                      transform: showControls ? "translateY(0)" : "translateY(12px)",
-                      transition: "transform .35s ease" }}>
-
-        <div style={{ padding: isMobile ? "0 10px 2px" : "0 16px 4px", color: "#fff",
-                      fontSize: isMobile ? ".78rem" : ".85rem", fontWeight: 700,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pointerEvents: "none" }}>
-          {title}
-        </div>
-
-        {/* barra de progreso */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6,
-                      padding: isMobile ? "0 10px 4px" : "0 16px 6px", pointerEvents: "auto" }}>
-          <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28 }}>{timeCur}</span>
-          <div onClick={seekBar} onTouchStart={seekBar} style={{ flex: 1, height: isMobile ? 3 : 4,
-                                          background: "rgba(255,255,255,.2)", borderRadius: 2, cursor: "pointer" }}>
-            <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47",
-                          borderRadius: 2, transition: "width .4s linear" }} />
+        {/* Controls zone — stopPropagation prevents touch from reaching the video area toggle */}
+        <div
+          onTouchStart={(e) => e.stopPropagation()}
+          style={{ position: "relative", zIndex: 1,
+                   transform: showControls ? "translateY(0)" : "translateY(12px)",
+                   transition: "transform .35s ease",
+                   pointerEvents: showControls ? "auto" : "none" }}
+        >
+          <div style={{ padding: isMobile ? "0 10px 2px" : "0 16px 4px", color: "#fff",
+                        fontSize: isMobile ? ".78rem" : ".85rem", fontWeight: 700,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {title}
           </div>
-          <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28, textAlign: "right" }}>{timeTot}</span>
-        </div>
 
-        {/* botones */}
-        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
-                      padding: isMobile ? "0 10px 10px" : "0 16px 16px", pointerEvents: "auto",
-                      flexWrap: "nowrap", overflow: "hidden" }}>
-          {/* -15s */}
-          <button style={btn(false)} onClick={() => skip(-15)}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 3, verticalAlign: "middle" }}><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-5"/></svg>
-            15s
-          </button>
-          {/* play / pause */}
-          <button style={{ ...btn(true), display: "inline-flex", alignItems: "center", gap: 4 }} onClick={togglePlay}>
-            {playing ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
-            ) : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-            )}
-            <span>{playing ? "Pausa" : "Play"}</span>
-          </button>
-          {/* +15s */}
-          <button style={btn(false)} onClick={() => skip(15)}>
-            15s
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginLeft: 3, verticalAlign: "middle" }}><path d="M23 4v6h-6"/><path d="M20.49 15A9 9 0 1 1 20 10"/></svg>
-          </button>
-          <div style={{ flex: 1 }} />
-          {/* mute / unmute */}
-          <button style={btn(false)} onClick={toggleMute}>
-            {muted ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-            )}
-          </button>
-          {/* fullscreen */}
-          <button style={btn(false)} onClick={toggleFs}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-          </button>
+          {/* progress bar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6,
+                        padding: isMobile ? "0 10px 4px" : "0 16px 6px" }}>
+            <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28 }}>{timeCur}</span>
+            <div onClick={seekBar} onTouchStart={seekBar}
+                 style={{ flex: 1, height: isMobile ? 3 : 4, background: "rgba(255,255,255,.2)",
+                          borderRadius: 2, cursor: "pointer" }}>
+              <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47",
+                            borderRadius: 2, transition: "width .4s linear" }} />
+            </div>
+            <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28, textAlign: "right" }}>{timeTot}</span>
+          </div>
+
+          {/* buttons */}
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
+                        padding: isMobile ? "0 10px 10px" : "0 16px 16px",
+                        flexWrap: "nowrap", overflow: "hidden" }}>
+            <button style={btn(false)} onClick={() => skip(-15)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 3, verticalAlign: "middle" }}><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-5"/></svg>
+              15s
+            </button>
+            <button style={{ ...btn(true), display: "inline-flex", alignItems: "center", gap: 4 }} onClick={togglePlay}>
+              {playing ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+              )}
+              <span>{playing ? "Pausa" : "Play"}</span>
+            </button>
+            <button style={btn(false)} onClick={() => skip(15)}>
+              15s
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginLeft: 3, verticalAlign: "middle" }}><path d="M23 4v6h-6"/><path d="M20.49 15A9 9 0 1 1 20 10"/></svg>
+            </button>
+            <div style={{ flex: 1 }} />
+            <button style={btn(false)} onClick={toggleMute}>
+              {muted ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              )}
+            </button>
+            <button style={btn(false)} onClick={toggleFs}>
+              {isFs ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+              )}
+            </button>
+          </div>
         </div>
-        </div>{/* end slide wrapper */}
-      </div>{/* end overlay */}
+      </div>
     </div>
   );
 }

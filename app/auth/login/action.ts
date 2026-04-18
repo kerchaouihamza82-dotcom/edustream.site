@@ -15,8 +15,9 @@ export async function loginAction(formData: FormData) {
     cookieStore.set("edustream_auth", "1", {
       path: "/",
       maxAge: 60 * 60 * 24 * 7, // 7 days
-      httpOnly: true,
+      httpOnly: false,
       sameSite: "lax",
+      secure: false,
     });
     redirect("/");
   }

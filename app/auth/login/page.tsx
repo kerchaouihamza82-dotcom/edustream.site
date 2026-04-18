@@ -12,9 +12,16 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     const formData = new FormData(e.currentTarget);
-    const result = await loginAction(formData);
-    if (result?.error) {
-      setError(result.error);
+    try {
+      const result = await loginAction(formData);
+      if (result?.error) {
+        setError(result.error);
+        setLoading(false);
+      }
+    } catch (err: any) {
+      // Next.js redirect() throws internally — if it's a redirect, let it through
+      if (err?.digest?.startsWith("NEXT_REDIRECT")) throw err;
+      setError("Error inesperado. Inténtalo de nuevo.");
       setLoading(false);
     }
   }

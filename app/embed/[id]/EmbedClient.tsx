@@ -163,19 +163,33 @@ export default function EmbedClient({ ytId, title, embedId }) {
     } catch (_) {}
   };
 
+  const isIOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   const toggleFs = () => {
     keepAlive();
+
+    // iOS Safari: requestFullscreen is completely blocked inside iframes.
+    // The only reliable solution: open the embed page in a new Safari tab.
+    // It loads instantly (same URL, same video), fills the entire screen,
+    // and the user can close the tab to return. No dependency on any other platform.
+    if (isIOS) {
+      window.open(`https://edustream.site/embed/${embedId}`, "_blank");
+      return;
+    }
+
+    // Android / Desktop: standard CSS + requestFullscreen
     setIsFs((prev) => {
       const next = !prev;
-      // Send postMessage to parent (academy page).
-      // The parent creates a fixed overlay with a new iframe — works on ALL devices including iOS.
-      try {
-        window.parent.postMessage({
-          type: "edustream-fullscreen",
-          value: next,
-          embedUrl: `https://edustream.site/embed/${embedId}`,
-        }, "*");
-      } catch (_) {}
+      const el = wrapRef.current;
+      if (!el) return next;
+      if (next) {
+        const enter = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
+        if (enter) enter.call(el).catch(() => {});
+      } else {
+        const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
+        if (exit) exit.call(document).catch(() => {});
+      }
+      try { window.parent.postMessage({ type: "edustream-fullscreen", value: next }, "*"); } catch (_) {}
       return next;
     });
   };

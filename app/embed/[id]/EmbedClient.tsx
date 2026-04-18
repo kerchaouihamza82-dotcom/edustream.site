@@ -27,41 +27,56 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
-  const HIDE_DELAY = 5000; // 5s — enough time to interact
+  // Listen for fullscreen change events to sync isFs state
+  useEffect(() => {
+    const onFsChange = () => {
+      const inFs = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement
+      );
+      setIsFs(inFs);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange);
+    document.addEventListener("mozfullscreenchange", onFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange);
+      document.removeEventListener("mozfullscreenchange", onFsChange);
+    };
+  }, []);
 
-  // Desktop: show on mouse move, reset timer on any interaction
+  const HIDE_DELAY = 3000;
+
+  const scheduleHide = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+  };
+
   const revealControls = () => {
     setShowControls(true);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+    scheduleHide();
   };
 
-  // Called on every button click to keep controls visible while interacting
   const keepAlive = () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+    setShowControls(true);
+    scheduleHide();
   };
 
-  // Mobile: first tap shows, second tap (outside buttons) hides
   const handleTouch = (e) => {
-    // Button tap — keep controls visible, reset timer
-    const tag = e.target.tagName;
-    if (tag === "BUTTON" || tag === "svg" || tag === "path" || tag === "rect" || tag === "polygon" || tag === "line") {
+    if ((e.target).closest("button")) {
       keepAlive();
       return;
     }
-    // Area tap — toggle
     setShowControls((prev) => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      if (!prev) {
-        hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
-      }
+      if (!prev) scheduleHide();
       return !prev;
     });
   };
 
   useEffect(() => {
-    /* -- exactly the same as EduStreamApp -- */
     function startTimer() {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = setInterval(() => {
@@ -83,15 +98,23 @@ export default function EmbedClient({ ytId, title }) {
       if (!el) return;
       if (playerRef.current) return;
       const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
-      playerRef.current = new (window).YT.Player("yt-player", {
+      playerRef.current = new window.YT.Player("yt-player", {
         videoId: ytId,
-        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
+        playerVars: {
+          modestbranding: 1,
+          rel: 0,
+          showinfo: 0,
+          controls: 0,
+          fs: 0,
+          iv_load_policy: 3,
+          playsinline: 1,
+          mute: mobile ? 1 : 0,
+        },
         events: {
           onReady: (e) => {
             if (mobile) {
               e.target.mute();
               setMuted(true);
-              // Show controls briefly so user sees the unmute button
               setShowControls(true);
               if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
               hideTimerRef.current = setTimeout(() => setShowControls(false), 5000);
@@ -101,9 +124,8 @@ export default function EmbedClient({ ytId, title }) {
             startTimer();
           },
           onStateChange: (e) => {
-            const YT = (window).YT;
-            const isPlaying = e.data === YT.PlayerState.PLAYING;
-            setPlaying(isPlaying);
+            const YT = window.YT;
+            setPlaying(e.data === YT.PlayerState.PLAYING);
             if (e.data === YT.PlayerState.ENDED) {
               if (timerRef.current) clearInterval(timerRef.current);
               setProgress(100);
@@ -113,15 +135,13 @@ export default function EmbedClient({ ytId, title }) {
       });
     }
 
-    /* set callback BEFORE loading script */
-    const prev = (window).onYouTubeIframeAPIReady;
-    (window).onYouTubeIframeAPIReady = () => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
       if (prev) prev();
       createPlayer();
     };
 
-    /* if API already available, create immediately */
-    if ((window).YT && (window).YT.Player) {
+    if (window.YT && window.YT.Player) {
       createPlayer();
     } else if (!document.getElementById("yt-api-script")) {
       const tag = document.createElement("script");
@@ -134,21 +154,22 @@ export default function EmbedClient({ ytId, title }) {
       if (timerRef.current) clearInterval(timerRef.current);
       try { playerRef.current?.destroy(); } catch (_) {}
     };
-  }, []); // run once on mount — ytId is stable
+  }, []);
 
-  /* controls */
   const togglePlay = () => {
     keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try { playing ? p.pauseVideo() : p.playVideo(); } catch (_) {}
   };
+
   const skip = (sec) => {
     keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try { p.seekTo(Math.max(0, p.getCurrentTime() + sec), true); } catch (_) {}
   };
+
   const toggleMute = () => {
     keepAlive();
     const p = playerRef.current;
@@ -158,32 +179,48 @@ export default function EmbedClient({ ytId, title }) {
       else        { p.mute();  setMuted(true);  }
     } catch (_) {}
   };
+
   const toggleFs = () => {
     keepAlive();
-    setIsFs((prev) => {
-      const next = !prev;
-      // Communicate to parent iframe to expand/collapse
-      try {
-        window.parent.postMessage({ type: "edustream-fullscreen", value: next }, "*");
-      } catch (_) {}
-      // Also manipulate html/body so the fixed container truly covers the screen
-      if (next) {
-        document.documentElement.style.cssText = "position:fixed;inset:0;width:100%;height:100%;overflow:hidden;";
-        document.body.style.cssText = "position:fixed;inset:0;width:100%;height:100%;overflow:hidden;margin:0;padding:0;";
+    const el = wrapRef.current;
+    if (!el) return;
+
+    const inFs = !!(
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.mozFullScreenElement
+    );
+
+    if (inFs) {
+      // Exit fullscreen
+      (document.exitFullscreen ||
+        document.webkitExitFullscreen ||
+        document.mozCancelFullScreen
+      )?.call(document);
+    } else {
+      // Enter fullscreen — try all browser APIs
+      const enter =
+        el.requestFullscreen ||
+        el.webkitRequestFullscreen ||
+        el.mozRequestFullScreen ||
+        el.msRequestFullscreen;
+
+      if (enter) {
+        enter.call(el).catch(() => {});
       } else {
-        document.documentElement.style.cssText = "";
-        document.body.style.cssText = "";
+        // Last resort: postMessage to parent to expand iframe
+        try { window.parent.postMessage({ type: "edustream-fullscreen", value: true }, "*"); } catch (_) {}
+        setIsFs(true);
       }
-      return next;
-    });
+    }
   };
+
   const seekBar = (e) => {
     keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try {
       const rect = e.currentTarget.getBoundingClientRect();
-      // Support both mouse and touch events
       const clientX = e.touches ? e.touches[0]?.clientX : e.clientX;
       if (clientX === undefined) return;
       p.seekTo(((clientX - rect.left) / rect.width) * p.getDuration(), true);
@@ -205,78 +242,89 @@ export default function EmbedClient({ ytId, title }) {
     flexShrink: 0,
   });
 
-  const playerStyle = {
-    position: "fixed" as const,
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    zIndex: isFs ? 99999 : 0,
-    background: "#000",
-    overflow: "hidden",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  };
-
   return (
     <div
       ref={wrapRef}
       onMouseMove={isMobile ? undefined : revealControls}
       onTouchStart={isMobile ? handleTouch : undefined}
-      style={playerStyle}
+      style={{
+        position: "fixed",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        background: "#000",
+        overflow: "hidden",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}
     >
-      {/* YouTube player div */}
-      <div id="yt-player" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
+      {/* YouTube player */}
+      <div
+        id="yt-player"
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+      />
 
-      {/* Controls overlay — fade + slide-up */}
-      <div style={{ position: "absolute", inset: 0, zIndex: 10, display: "flex", flexDirection: "column",
-                    justifyContent: "flex-end", pointerEvents: "none",
-                    opacity: showControls ? 1 : 0,
-                    transition: "opacity .35s ease" }}>
-
-        {/* dark gradient from bottom */}
+      {/* Controls overlay */}
+      <div style={{
+        position: "absolute", inset: 0, zIndex: 10,
+        display: "flex", flexDirection: "column", justifyContent: "flex-end",
+        pointerEvents: "none",
+        opacity: showControls ? 1 : 0,
+        transition: "opacity .3s ease",
+      }}>
+        {/* Gradient */}
         <div style={{
-          position: "absolute", inset: 0,
-          background: "linear-gradient(to top, rgba(0,0,0,.97) 0%, rgba(0,0,0,.75) 35%, rgba(0,0,0,.2) 60%, transparent 80%)",
-          opacity: showControls ? 1 : 0,
-          transform: showControls ? "translateY(0)" : "translateY(12px)",
-          transition: "opacity .35s ease, transform .35s ease",
-          pointerEvents: "none",
+          position: "absolute", inset: 0, pointerEvents: "none",
+          background: "linear-gradient(to top, rgba(0,0,0,.95) 0%, rgba(0,0,0,.6) 30%, rgba(0,0,0,.1) 60%, transparent 80%)",
+          transform: showControls ? "translateY(0)" : "translateY(10px)",
+          transition: "transform .3s ease",
         }} />
 
-        {/* Controls zone — stopPropagation prevents touch from reaching the video area toggle */}
+        {/* Controls content */}
         <div
-          onTouchStart={(e) => e.stopPropagation()}
-          style={{ position: "relative", zIndex: 1,
-                   transform: showControls ? "translateY(0)" : "translateY(12px)",
-                   transition: "transform .35s ease",
-                   pointerEvents: showControls ? "auto" : "none" }}
+          onTouchStart={(e) => { e.stopPropagation(); keepAlive(); }}
+          style={{
+            position: "relative", zIndex: 1,
+            transform: showControls ? "translateY(0)" : "translateY(10px)",
+            transition: "transform .3s ease",
+            pointerEvents: showControls ? "auto" : "none",
+          }}
         >
-          <div style={{ padding: isMobile ? "0 10px 2px" : "0 16px 4px", color: "#fff",
-                        fontSize: isMobile ? ".78rem" : ".85rem", fontWeight: 700,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {/* Title */}
+          <div style={{
+            padding: isMobile ? "0 10px 2px" : "0 16px 4px",
+            color: "#fff", fontSize: isMobile ? ".78rem" : ".85rem", fontWeight: 700,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
             {title}
           </div>
 
-          {/* progress bar */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6,
-                        padding: isMobile ? "0 10px 4px" : "0 16px 6px" }}>
+          {/* Progress bar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "0 10px 4px" : "0 16px 6px" }}>
             <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28 }}>{timeCur}</span>
-            <div onClick={seekBar} onTouchStart={seekBar}
-                 style={{ flex: 1, height: isMobile ? 3 : 4, background: "rgba(255,255,255,.2)",
-                          borderRadius: 2, cursor: "pointer" }}>
-              <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47",
-                            borderRadius: 2, transition: "width .4s linear" }} />
+            <div
+              onClick={seekBar}
+              onTouchStart={seekBar}
+              style={{ flex: 1, height: isMobile ? 4 : 4, background: "rgba(255,255,255,.2)", borderRadius: 2, cursor: "pointer" }}
+            >
+              <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47", borderRadius: 2, transition: "width .4s linear" }} />
             </div>
             <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28, textAlign: "right" }}>{timeTot}</span>
           </div>
 
-          {/* buttons */}
-          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
-                        padding: isMobile ? "0 10px 10px" : "0 16px 16px",
-                        flexWrap: "nowrap", overflow: "hidden" }}>
+          {/* Buttons */}
+          <div style={{
+            display: "flex", alignItems: "center",
+            gap: isMobile ? 5 : 8,
+            padding: isMobile ? "0 10px 12px" : "0 16px 16px",
+            flexWrap: "nowrap", overflow: "hidden",
+          }}>
+            {/* -15s */}
             <button style={btn(false)} onClick={() => skip(-15)}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 3, verticalAlign: "middle" }}><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-5"/></svg>
               15s
             </button>
+
+            {/* Play / Pause */}
             <button style={{ ...btn(true), display: "inline-flex", alignItems: "center", gap: 4 }} onClick={togglePlay}>
               {playing ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
@@ -285,11 +333,16 @@ export default function EmbedClient({ ytId, title }) {
               )}
               <span>{playing ? "Pausa" : "Play"}</span>
             </button>
+
+            {/* +15s */}
             <button style={btn(false)} onClick={() => skip(15)}>
               15s
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginLeft: 3, verticalAlign: "middle" }}><path d="M23 4v6h-6"/><path d="M20.49 15A9 9 0 1 1 20 10"/></svg>
             </button>
+
             <div style={{ flex: 1 }} />
+
+            {/* Mute */}
             <button style={btn(false)} onClick={toggleMute}>
               {muted ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
@@ -297,6 +350,8 @@ export default function EmbedClient({ ytId, title }) {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
               )}
             </button>
+
+            {/* Fullscreen */}
             <button style={btn(false)} onClick={toggleFs}>
               {isFs ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>

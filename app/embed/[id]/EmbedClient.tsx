@@ -14,6 +14,7 @@ export default function EmbedClient({ ytId, title }) {
   const wrapRef      = useRef(null);
   const hideTimerRef = useRef(null);
 
+
   const [playing,      setPlaying]      = useState(false);
   const [muted,        setMuted]        = useState(false);
   const [progress,     setProgress]     = useState(0);
@@ -27,25 +28,7 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
-  // Listen for fullscreen change events to sync isFs state
-  useEffect(() => {
-    const onFsChange = () => {
-      const inFs = !!(
-        document.fullscreenElement ||
-        document.webkitFullscreenElement ||
-        document.mozFullScreenElement
-      );
-      setIsFs(inFs);
-    };
-    document.addEventListener("fullscreenchange", onFsChange);
-    document.addEventListener("webkitfullscreenchange", onFsChange);
-    document.addEventListener("mozfullscreenchange", onFsChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", onFsChange);
-      document.removeEventListener("webkitfullscreenchange", onFsChange);
-      document.removeEventListener("mozfullscreenchange", onFsChange);
-    };
-  }, []);
+
 
   const HIDE_DELAY = 3000;
 
@@ -182,37 +165,7 @@ export default function EmbedClient({ ytId, title }) {
 
   const toggleFs = () => {
     keepAlive();
-    const el = wrapRef.current;
-    if (!el) return;
-
-    const inFs = !!(
-      document.fullscreenElement ||
-      document.webkitFullscreenElement ||
-      document.mozFullScreenElement
-    );
-
-    if (inFs) {
-      // Exit fullscreen
-      (document.exitFullscreen ||
-        document.webkitExitFullscreen ||
-        document.mozCancelFullScreen
-      )?.call(document);
-    } else {
-      // Enter fullscreen — try all browser APIs
-      const enter =
-        el.requestFullscreen ||
-        el.webkitRequestFullscreen ||
-        el.mozRequestFullScreen ||
-        el.msRequestFullscreen;
-
-      if (enter) {
-        enter.call(el).catch(() => {});
-      } else {
-        // Last resort: postMessage to parent to expand iframe
-        try { window.parent.postMessage({ type: "edustream-fullscreen", value: true }, "*"); } catch (_) {}
-        setIsFs(true);
-      }
-    }
+    setIsFs((prev) => !prev);
   };
 
   const seekBar = (e) => {
@@ -249,9 +202,11 @@ export default function EmbedClient({ ytId, title }) {
       onTouchStart={isMobile ? handleTouch : undefined}
       style={{
         position: "fixed",
-        inset: 0,
-        width: "100%",
-        height: "100%",
+        top: 0,
+        left: 0,
+        width: isFs ? "100vw" : "100%",
+        height: isFs ? "100vh" : "100%",
+        zIndex: isFs ? 999999 : 0,
         background: "#000",
         overflow: "hidden",
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",

@@ -8,7 +8,7 @@ function fmt(s) {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 }
 
-export default function EmbedClient({ ytId, title }) {
+export default function EmbedClient({ ytId, title, embedId }) {
   const playerRef    = useRef(null);
   const timerRef     = useRef(null);
   const wrapRef      = useRef(null);
@@ -163,11 +163,32 @@ export default function EmbedClient({ ytId, title }) {
     } catch (_) {}
   };
 
+  const isIOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   const toggleFs = () => {
     keepAlive();
+
+    // iOS Safari: requestFullscreen is completely blocked inside iframes.
+    // The only reliable solution: open the embed page in a new Safari tab.
+    // It loads instantly (same URL, same video), fills the entire screen,
+    // and the user can close the tab to return. No dependency on any other platform.
+    if (isIOS) {
+      window.open(`https://edustream.site/embed/${embedId}`, "_blank");
+      return;
+    }
+
+    // Android / Desktop: standard CSS + requestFullscreen
     setIsFs((prev) => {
       const next = !prev;
-      // Tell the parent page to expand/collapse the iframe
+      const el = wrapRef.current;
+      if (!el) return next;
+      if (next) {
+        const enter = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
+        if (enter) enter.call(el).catch(() => {});
+      } else {
+        const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
+        if (exit) exit.call(document).catch(() => {});
+      }
       try { window.parent.postMessage({ type: "edustream-fullscreen", value: next }, "*"); } catch (_) {}
       return next;
     });

@@ -26,24 +26,34 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
-  // Desktop: show on mouse move, auto-hide after 3s
+  const HIDE_DELAY = 5000; // 5s — enough time to interact
+
+  // Desktop: show on mouse move, reset timer on any interaction
   const revealControls = () => {
     setShowControls(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
   };
 
-  // Mobile: tap toggles controls on/off (like YouTube)
+  // Called on every button click to keep controls visible while interacting
+  const keepAlive = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+  };
+
+  // Mobile: first tap shows, second tap (outside buttons) hides
   const handleTouch = (e) => {
-    // If tapping a button directly, don't toggle — let the button handle it
-    if (e.target.tagName === "BUTTON") return;
+    // Button tap — keep controls visible, reset timer
+    const tag = e.target.tagName;
+    if (tag === "BUTTON" || tag === "svg" || tag === "path" || tag === "rect" || tag === "polygon" || tag === "line") {
+      keepAlive();
+      return;
+    }
+    // Area tap — toggle
     setShowControls((prev) => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       if (!prev) {
-        // Showing — auto-hide after 3s if no further interaction
-        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-        hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
-      } else {
-        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
       }
       return !prev;
     });
@@ -120,16 +130,19 @@ export default function EmbedClient({ ytId, title }) {
 
   /* controls */
   const togglePlay = () => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try { playing ? p.pauseVideo() : p.playVideo(); } catch (_) {}
   };
   const skip = (sec) => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try { p.seekTo(Math.max(0, p.getCurrentTime() + sec), true); } catch (_) {}
   };
   const toggleMute = () => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try {
@@ -138,19 +151,16 @@ export default function EmbedClient({ ytId, title }) {
     } catch (_) {}
   };
   const toggleFs = () => {
-    // iOS Safari: use the native <video> element inside the YT iframe
-    try {
-      const iframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
-      const video  = iframe?.contentDocument?.querySelector("video") as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
-      if (video?.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
-    } catch (_) {}
-    // Standard fullscreen (Android Chrome, desktop)
+    keepAlive();
     const el = wrapRef.current;
     if (!el) return;
-    if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
-      (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document);
+    const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+    if (isFs) {
+      const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
+      if (exit) exit.call(document);
     } else {
-      (el.requestFullscreen || (el as any).webkitRequestFullscreen)?.call(el);
+      const enter = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen || (el as any).msRequestFullscreen;
+      if (enter) enter.call(el);
     }
   };
   const seekBar = (e) => {

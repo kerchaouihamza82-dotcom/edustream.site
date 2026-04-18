@@ -30,21 +30,28 @@ export async function updateSession(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    // Protect /dashboard — redirect to login if not authenticated
-    if (request.nextUrl.pathname.startsWith("/dashboard") && !user) {
+    const { pathname } = request.nextUrl;
+
+    // Public routes — always allow
+    if (
+      pathname.startsWith("/auth") ||
+      pathname.startsWith("/watch") ||
+      pathname.startsWith("/embed")
+    ) {
+      return supabaseResponse;
+    }
+
+    // Protect /library — redirect to login if not authenticated
+    if (pathname.startsWith("/library") && !user) {
       const url = request.nextUrl.clone();
       url.pathname = "/auth/login";
       return NextResponse.redirect(url);
     }
 
     // Redirect logged-in users away from auth pages
-    if (
-      user &&
-      (request.nextUrl.pathname.startsWith("/auth/login") ||
-        request.nextUrl.pathname.startsWith("/auth/register"))
-    ) {
+    if (user && (pathname === "/auth/login" || pathname === "/auth/register")) {
       const url = request.nextUrl.clone();
-      url.pathname = "/dashboard";
+      url.pathname = "/library";
       return NextResponse.redirect(url);
     }
   } catch {

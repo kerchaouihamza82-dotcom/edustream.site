@@ -84,9 +84,7 @@ export default function EmbedClient({ ytId, title }) {
       const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
       playerRef.current = new (window).YT.Player("yt-player", {
         videoId: ytId,
-        // Mobile: controls:1 so YouTube manages its own native fullscreen via the OS
-        // Desktop: controls:0 so our custom controls overlay takes over
-        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 1, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
+        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
             if (mobile) {
@@ -168,10 +166,7 @@ export default function EmbedClient({ ytId, title }) {
       const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
       if (exit) exit.call(document);
     } else {
-      const enter = el.requestFullscreen
-        || (el as any).webkitRequestFullscreen
-        || (el as any).mozRequestFullScreen
-        || (el as any).msRequestFullscreen;
+      const enter = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen || (el as any).msRequestFullscreen;
       if (enter) enter.call(el);
     }
   };
@@ -262,13 +257,15 @@ export default function EmbedClient({ ytId, title }) {
             15s
           </button>
           {/* play / pause */}
-          <button style={{ ...btn(true), display: "inline-flex", alignItems: "center", gap: 4 }} onClick={togglePlay}>
+          <button style={btn(true)} onClick={togglePlay}>
             {playing ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
+              // pause: two vertical bars
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
             ) : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+              // play: triangle
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: "middle" }}><polygon points="5,3 19,12 5,21"/></svg>
             )}
-            <span>{playing ? "Pausa" : "Play"}</span>
+            {playing ? "Pausa" : "Play"}
           </button>
           {/* +15s */}
           <button style={btn(false)} onClick={() => skip(15)}>
@@ -284,7 +281,7 @@ export default function EmbedClient({ ytId, title }) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
             )}
           </button>
-          {/* fullscreen — visible on all devices */}
+          {/* fullscreen */}
           <button style={btn(false)} onClick={toggleFs}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
           </button>

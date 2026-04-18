@@ -9,9 +9,10 @@ function fmt(s) {
 }
 
 export default function EmbedClient({ ytId, title }) {
-  const playerRef = useRef(null);
-  const timerRef  = useRef(null);
-  const wrapRef   = useRef(null);
+  const playerRef    = useRef(null);
+  const timerRef     = useRef(null);
+  const wrapRef      = useRef(null);
+  const hideTimerRef = useRef(null);
 
   const [playing,      setPlaying]      = useState(false);
   const [muted,        setMuted]        = useState(false);
@@ -19,7 +20,11 @@ export default function EmbedClient({ ytId, title }) {
   const [timeCur,      setTimeCur]      = useState("0:00");
   const [timeTot,      setTimeTot]      = useState("0:00");
   const [showControls, setShowControls] = useState(false);
-  const hideTimerRef = useRef(null);
+  const [isMobile,     setIsMobile]     = useState(false);
+
+  useEffect(() => {
+    setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
+  }, []);
 
   const revealControls = () => {
     setShowControls(true);
@@ -49,11 +54,13 @@ export default function EmbedClient({ ytId, title }) {
       const el = document.getElementById("yt-player");
       if (!el) return;
       if (playerRef.current) return;
+      const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
       playerRef.current = new (window).YT.Player("yt-player", {
         videoId: ytId,
-        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1 },
+        playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
+            if (mobile) { e.target.mute(); setMuted(true); }
             setPlaying(true);
             e.target.playVideo();
             startTimer();
@@ -131,14 +138,15 @@ export default function EmbedClient({ ytId, title }) {
     background: primary ? "#e8ff47" : "rgba(255,255,255,.12)",
     border: `1px solid ${primary ? "#e8ff47" : "rgba(255,255,255,.2)"}`,
     color: primary ? "#000" : "#fff",
-    borderRadius: 7,
-    padding: "8px 14px",
-    fontSize: ".8rem",
+    borderRadius: 6,
+    padding: isMobile ? "6px 10px" : "8px 14px",
+    fontSize: isMobile ? ".72rem" : ".8rem",
     fontWeight: 700,
     cursor: "pointer",
     fontFamily: "inherit",
     whiteSpace: "nowrap",
     pointerEvents: "auto",
+    flexShrink: 0,
   });
 
   return (
@@ -161,30 +169,34 @@ export default function EmbedClient({ ytId, title }) {
                       ? "linear-gradient(to top, rgba(0,0,0,.85) 0%, rgba(0,0,0,.15) 50%, transparent 70%)"
                       : "transparent" }}>
 
-        <div style={{ padding: "0 16px 4px", color: "#fff", fontSize: ".85rem", fontWeight: 700,
+        <div style={{ padding: isMobile ? "0 10px 2px" : "0 16px 4px", color: "#fff",
+                      fontSize: isMobile ? ".78rem" : ".85rem", fontWeight: 700,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pointerEvents: "none" }}>
           {title}
         </div>
 
         {/* barra de progreso */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px 6px", pointerEvents: "auto" }}>
-          <span style={{ fontSize: ".7rem", color: "rgba(255,255,255,.6)", minWidth: 32 }}>{timeCur}</span>
-          <div onClick={seekBar} style={{ flex: 1, height: 4, background: "rgba(255,255,255,.2)",
-                                          borderRadius: 2, cursor: "pointer" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6,
+                      padding: isMobile ? "0 10px 4px" : "0 16px 6px", pointerEvents: "auto" }}>
+          <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28 }}>{timeCur}</span>
+          <div onClick={seekBar} style={{ flex: 1, height: isMobile ? 3 : 4,
+                                          background: "rgba(255,255,255,.2)", borderRadius: 2, cursor: "pointer" }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47",
                           borderRadius: 2, transition: "width .4s linear" }} />
           </div>
-          <span style={{ fontSize: ".7rem", color: "rgba(255,255,255,.6)", minWidth: 32, textAlign: "right" }}>{timeTot}</span>
+          <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28, textAlign: "right" }}>{timeTot}</span>
         </div>
 
         {/* botones */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px 16px", pointerEvents: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
+                      padding: isMobile ? "0 10px 10px" : "0 16px 16px", pointerEvents: "auto",
+                      flexWrap: "nowrap", overflow: "hidden" }}>
           <button style={btn(false)} onClick={() => skip(-15)}>−15s</button>
           <button style={btn(true)}  onClick={togglePlay}>{playing ? "⏸ Pausa" : "▶ Play"}</button>
           <button style={btn(false)} onClick={() => skip(15)}>+15s</button>
           <div style={{ flex: 1 }} />
-          <button style={btn(false)} onClick={toggleMute}>{muted ? "🔇 Silencio" : "🔊 Sonido"}</button>
-          <button style={btn(false)} onClick={toggleFs}>⛶ Pantalla</button>
+          <button style={btn(false)} onClick={toggleMute}>{muted ? "🔇" : "🔊"}</button>
+          <button style={btn(false)} onClick={toggleFs}>⛶</button>
         </div>
       </div>
     </div>

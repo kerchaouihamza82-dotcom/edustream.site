@@ -26,24 +26,34 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
-  // Desktop: show on mouse move, auto-hide after 3s
+  const HIDE_DELAY = 5000; // 5s — enough time to interact
+
+  // Desktop: show on mouse move, reset timer on any interaction
   const revealControls = () => {
     setShowControls(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
   };
 
-  // Mobile: tap toggles controls on/off (like YouTube)
+  // Called on every button click to keep controls visible while interacting
+  const keepAlive = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+  };
+
+  // Mobile: first tap shows, second tap (outside buttons) hides
   const handleTouch = (e) => {
-    // If tapping a button directly, don't toggle — let the button handle it
-    if (e.target.tagName === "BUTTON") return;
+    // Button tap — keep controls visible, reset timer
+    const tag = e.target.tagName;
+    if (tag === "BUTTON" || tag === "svg" || tag === "path" || tag === "rect" || tag === "polygon" || tag === "line") {
+      keepAlive();
+      return;
+    }
+    // Area tap — toggle
     setShowControls((prev) => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       if (!prev) {
-        // Showing — auto-hide after 3s if no further interaction
-        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-        hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
-      } else {
-        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
       }
       return !prev;
     });
@@ -77,7 +87,14 @@ export default function EmbedClient({ ytId, title }) {
         playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
-            if (mobile) { e.target.mute(); setMuted(true); }
+            if (mobile) {
+              e.target.mute();
+              setMuted(true);
+              // Show controls briefly so user sees the unmute button
+              setShowControls(true);
+              if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+              hideTimerRef.current = setTimeout(() => setShowControls(false), 5000);
+            }
             setPlaying(true);
             e.target.playVideo();
             startTimer();
@@ -120,16 +137,19 @@ export default function EmbedClient({ ytId, title }) {
 
   /* controls */
   const togglePlay = () => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try { playing ? p.pauseVideo() : p.playVideo(); } catch (_) {}
   };
   const skip = (sec) => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try { p.seekTo(Math.max(0, p.getCurrentTime() + sec), true); } catch (_) {}
   };
   const toggleMute = () => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try {
@@ -138,27 +158,28 @@ export default function EmbedClient({ ytId, title }) {
     } catch (_) {}
   };
   const toggleFs = () => {
-    // iOS Safari: use the native <video> element inside the YT iframe
-    try {
-      const iframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement;
-      const video  = iframe?.contentDocument?.querySelector("video") as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
-      if (video?.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
-    } catch (_) {}
-    // Standard fullscreen (Android Chrome, desktop)
+    keepAlive();
     const el = wrapRef.current;
     if (!el) return;
-    if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
-      (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document);
+    const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+    if (isFs) {
+      const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
+      if (exit) exit.call(document);
     } else {
-      (el.requestFullscreen || (el as any).webkitRequestFullscreen)?.call(el);
+      const enter = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen || (el as any).msRequestFullscreen;
+      if (enter) enter.call(el);
     }
   };
   const seekBar = (e) => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try {
       const rect = e.currentTarget.getBoundingClientRect();
-      p.seekTo(((e.clientX - rect.left) / rect.width) * p.getDuration(), true);
+      // Support both mouse and touch events
+      const clientX = e.touches ? e.touches[0]?.clientX : e.clientX;
+      if (clientX === undefined) return;
+      p.seekTo(((clientX - rect.left) / rect.width) * p.getDuration(), true);
     } catch (_) {}
   };
 
@@ -183,7 +204,7 @@ export default function EmbedClient({ ytId, title }) {
       onMouseMove={isMobile ? undefined : revealControls}
       onTouchStart={isMobile ? handleTouch : undefined}
       style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden",
-               fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", cursor: showControls ? "default" : "none" }}
+               fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
     >
       {/* div vacío — YouTube IFrame API lo reemplaza con el iframe controlado */}
       <div id="yt-player" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
@@ -218,7 +239,7 @@ export default function EmbedClient({ ytId, title }) {
         <div style={{ display: "flex", alignItems: "center", gap: 6,
                       padding: isMobile ? "0 10px 4px" : "0 16px 6px", pointerEvents: "auto" }}>
           <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28 }}>{timeCur}</span>
-          <div onClick={seekBar} style={{ flex: 1, height: isMobile ? 3 : 4,
+          <div onClick={seekBar} onTouchStart={seekBar} style={{ flex: 1, height: isMobile ? 3 : 4,
                                           background: "rgba(255,255,255,.2)", borderRadius: 2, cursor: "pointer" }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47",
                           borderRadius: 2, transition: "width .4s linear" }} />

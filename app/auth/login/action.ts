@@ -1,7 +1,6 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 
 const VALID_EMAIL = "kerchaouihamza82@gmail.com";
 const VALID_PASSWORD = "123456789K";
@@ -14,11 +13,11 @@ export async function loginAction(formData: FormData) {
     const cookieStore = await cookies();
     cookieStore.set("edustream_auth", "1", {
       path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-      httpOnly: true,
+      maxAge: 60 * 60 * 24 * 7,
+      httpOnly: false,
       sameSite: "lax",
     });
-    redirect("/");
+    return { ok: true };
   }
 
   return { error: "Email o contraseña incorrectos." };

@@ -13,10 +13,12 @@ export default function LoginPage() {
     setLoading(true);
     const formData = new FormData(e.currentTarget);
     const result = await loginAction(formData);
-    if (result?.error) {
-      setError(result.error);
-      setLoading(false);
+    if (result?.ok) {
+      window.location.href = "/";
+      return;
     }
+    setError(result?.error ?? "Error inesperado.");
+    setLoading(false);
   }
 
   return (

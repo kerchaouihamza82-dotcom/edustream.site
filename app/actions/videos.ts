@@ -43,7 +43,6 @@ export async function listVideosAction() {
   const { data, error } = await admin
     .from("videos")
     .select("id, title, slug, youtube_id, created_at")
-    .eq("is_active", true)
     .order("created_at", { ascending: false });
 
   if (error) return { error: error.message, videos: [] };

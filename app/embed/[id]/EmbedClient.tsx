@@ -87,7 +87,14 @@ export default function EmbedClient({ ytId, title }) {
         playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0, fs: 0, iv_load_policy: 3, playsinline: 1, mute: mobile ? 1 : 0 },
         events: {
           onReady: (e) => {
-            if (mobile) { e.target.mute(); setMuted(true); }
+            if (mobile) {
+              e.target.mute();
+              setMuted(true);
+              // Show controls briefly so user sees the unmute button
+              setShowControls(true);
+              if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+              hideTimerRef.current = setTimeout(() => setShowControls(false), 5000);
+            }
             setPlaying(true);
             e.target.playVideo();
             startTimer();
@@ -164,11 +171,15 @@ export default function EmbedClient({ ytId, title }) {
     }
   };
   const seekBar = (e) => {
+    keepAlive();
     const p = playerRef.current;
     if (!p) return;
     try {
       const rect = e.currentTarget.getBoundingClientRect();
-      p.seekTo(((e.clientX - rect.left) / rect.width) * p.getDuration(), true);
+      // Support both mouse and touch events
+      const clientX = e.touches ? e.touches[0]?.clientX : e.clientX;
+      if (clientX === undefined) return;
+      p.seekTo(((clientX - rect.left) / rect.width) * p.getDuration(), true);
     } catch (_) {}
   };
 
@@ -193,7 +204,7 @@ export default function EmbedClient({ ytId, title }) {
       onMouseMove={isMobile ? undefined : revealControls}
       onTouchStart={isMobile ? handleTouch : undefined}
       style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden",
-               fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", cursor: showControls ? "default" : "none" }}
+               fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
     >
       {/* div vacío — YouTube IFrame API lo reemplaza con el iframe controlado */}
       <div id="yt-player" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
@@ -228,7 +239,7 @@ export default function EmbedClient({ ytId, title }) {
         <div style={{ display: "flex", alignItems: "center", gap: 6,
                       padding: isMobile ? "0 10px 4px" : "0 16px 6px", pointerEvents: "auto" }}>
           <span style={{ fontSize: ".68rem", color: "rgba(255,255,255,.6)", minWidth: 28 }}>{timeCur}</span>
-          <div onClick={seekBar} style={{ flex: 1, height: isMobile ? 3 : 4,
+          <div onClick={seekBar} onTouchStart={seekBar} style={{ flex: 1, height: isMobile ? 3 : 4,
                                           background: "rgba(255,255,255,.2)", borderRadius: 2, cursor: "pointer" }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "#e8ff47",
                           borderRadius: 2, transition: "width .4s linear" }} />

@@ -26,35 +26,40 @@ export default function EmbedClient({ ytId, title }) {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
 
-  const HIDE_DELAY = 5000; // 5s — enough time to interact
+  const HIDE_DELAY = 3000; // 3s of inactivity before hiding
 
-  // Desktop: show on mouse move, reset timer on any interaction
+  // Resets the auto-hide timer — called on every interaction
+  const scheduleHide = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+  };
+
+  // Desktop: reveal on mouse move and reset timer
   const revealControls = () => {
     setShowControls(true);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+    scheduleHide();
   };
 
-  // Called on every button click to keep controls visible while interacting
+  // Every button click keeps controls visible and resets the timer
   const keepAlive = () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+    setShowControls(true);
+    scheduleHide();
   };
 
-  // Mobile: first tap shows, second tap (outside buttons) hides
+  // Mobile: tap on video area toggles; tap on button keeps visible
   const handleTouch = (e) => {
-    // Button tap — keep controls visible, reset timer
-    const tag = e.target.tagName;
-    if (tag === "BUTTON" || tag === "svg" || tag === "path" || tag === "rect" || tag === "polygon" || tag === "line") {
+    const tag = (e.target as HTMLElement).tagName.toUpperCase();
+    const isInteractiveElement = ["BUTTON", "SVG", "PATH", "RECT", "POLYGON", "LINE", "SPAN", "DIV"].includes(tag)
+      && (e.target as HTMLElement).closest("button");
+    if (isInteractiveElement) {
+      // Tapped a button — keep controls visible
       keepAlive();
       return;
     }
-    // Area tap — toggle
+    // Tapped video area — toggle controls
     setShowControls((prev) => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      if (!prev) {
-        hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
-      }
+      if (!prev) scheduleHide();
       return !prev;
     });
   };
@@ -163,15 +168,26 @@ export default function EmbedClient({ ytId, title }) {
     keepAlive();
     const el = wrapRef.current;
     if (!el) return;
-    const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+    const isFs = !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement
+    );
     if (isFs) {
-      const exit = document.exitFullscreen || (document as any).webkitExitFullscreen;
-      if (exit) exit.call(document);
+      // Exit fullscreen — all browsers
+      (document.exitFullscreen ||
+        (document as any).webkitExitFullscreen ||
+        (document as any).mozCancelFullScreen ||
+        (document as any).msExitFullscreen
+      )?.call(document);
     } else {
-      const enter = el.requestFullscreen
-        || (el as any).webkitRequestFullscreen
-        || (el as any).mozRequestFullScreen
-        || (el as any).msRequestFullscreen;
+      // Enter fullscreen — try all APIs including webkit for iOS/Android
+      const enter =
+        el.requestFullscreen ||
+        (el as any).webkitRequestFullscreen ||
+        (el as any).webkitEnterFullscreen ||
+        (el as any).mozRequestFullScreen ||
+        (el as any).msRequestFullscreen;
       if (enter) enter.call(el);
     }
   };

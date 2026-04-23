@@ -9,26 +9,44 @@ function getAdmin() {
   );
 }
 
+/** Clean a domain string: remove protocol, www, trailing slash */
+function cleanDomain(raw: string): string {
+  return raw
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/.*$/, "")
+    .trim()
+    .toLowerCase();
+}
+
 export async function addVideoAction(data: {
   ytId: string;
-  title: string;
-  category: string;
+  title?: string;
+  category?: string;
+  domain?: string;
 }) {
   const admin = getAdmin();
+
+  const domain = data.domain ? cleanDomain(data.domain) : undefined;
+
   const { data: video, error } = await admin
     .from("videos")
     .insert({
       youtube_id: data.ytId,
-      title: data.title,
-      slug: data.category,
-      description: data.category,
+      title: data.title || null,
+      slug: data.category || null,
+      description: data.category || null,
       is_active: true,
     })
     .select("id")
     .single();
 
-  if (error) return { error: error.message, id: null };
-  return { error: null, id: video.id as string };
+  if (error) return { error: error.message, id: null, embedToken: null };
+
+  const { generateEmbedToken } = await import("@/lib/embedToken");
+  const embedToken = generateEmbedToken(video.id, domain);
+
+  return { error: null, id: video.id as string, embedToken };
 }
 
 export async function deleteVideoAction(id: string) {

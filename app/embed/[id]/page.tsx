@@ -26,15 +26,15 @@ export default async function EmbedPage({
     return <h1>No autorizado</h1>;
   }
 
-  // --- Domain validation via Referer / Origin headers ---
-  const reqHeaders = await headers();
-  const referer = reqHeaders.get("referer") ?? "";
-  const origin  = reqHeaders.get("origin")  ?? "";
-  const source  = referer || origin;
-
-  const domainInSource = source.includes(payload.domain);
-  if (!domainInSource) {
-    return <h1>No autorizado</h1>;
+  // --- Domain validation via Referer / Origin headers (only if token includes domain) ---
+  if (payload.domain) {
+    const reqHeaders = await headers();
+    const referer = reqHeaders.get("referer") ?? "";
+    const origin  = reqHeaders.get("origin")  ?? "";
+    const source  = referer || origin;
+    if (!source.includes(payload.domain)) {
+      return <h1>No autorizado</h1>;
+    }
   }
 
   // --- Load video from Supabase ---

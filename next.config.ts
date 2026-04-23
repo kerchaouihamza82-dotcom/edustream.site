@@ -20,11 +20,17 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // /embed — designed specifically for iframe embedding in LMS/academies
+        // /embed — domain restriction enforced via signed JWT token + CSP
         source: "/embed/:path*",
         headers: [
+          // X-Frame-Options does not support multiple domains; rely on CSP instead
           { key: "X-Frame-Options", value: "ALLOWALL" },
-          { key: "Content-Security-Policy", value: "frame-ancestors *" },
+          // frame-ancestors restricts which domains can embed this page in an iframe.
+          // 'self' allows preview in v0/Vercel. Add your academy domain here.
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'self' https://miacademia.com",
+          },
         ],
       },
     ];

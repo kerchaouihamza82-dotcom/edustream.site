@@ -16,24 +16,23 @@ export default async function EmbedPage({
   const { id } = await params;
   const { token } = await searchParams;
 
-  // --- Token validation ---
-  if (!token) {
-    return <h1>No autorizado</h1>;
-  }
-
-  const payload = verifyEmbedToken(token);
-  if (!payload) {
-    return <h1>No autorizado</h1>;
-  }
-
-  // --- Domain validation via Referer / Origin headers (only if token includes domain) ---
-  if (payload.domain) {
-    const reqHeaders = await headers();
-    const referer = reqHeaders.get("referer") ?? "";
-    const origin  = reqHeaders.get("origin")  ?? "";
-    const source  = referer || origin;
-    if (!source.includes(payload.domain)) {
+  // --- Token validation (optional) ---
+  // If a token is present, validate it and optionally check domain restriction.
+  // If no token is provided, the embed works freely on any domain.
+  if (token) {
+    const payload = verifyEmbedToken(token);
+    if (!payload) {
       return <h1>No autorizado</h1>;
+    }
+    // Domain restriction — only enforced if the token includes a domain
+    if (payload.domain) {
+      const reqHeaders = await headers();
+      const referer = reqHeaders.get("referer") ?? "";
+      const origin  = reqHeaders.get("origin")  ?? "";
+      const source  = referer || origin;
+      if (source && !source.includes(payload.domain)) {
+        return <h1>No autorizado</h1>;
+      }
     }
   }
 

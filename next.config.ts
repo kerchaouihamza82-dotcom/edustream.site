@@ -20,8 +20,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // /embed — allow embedding from any domain.
-        // Domain restriction is enforced via signed JWT token in the page logic, not CSP.
+        // /embed — designed specifically for iframe embedding in LMS/academies
         source: "/embed/:path*",
         headers: [
           { key: "X-Frame-Options", value: "ALLOWALL" },

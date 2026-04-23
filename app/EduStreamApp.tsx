@@ -89,9 +89,7 @@ export default function EduStreamApp() {
   const [ytUrl, setYtUrl] = useState("");
   const [ytTitle, setYtTitle] = useState("");
   const [ytCategory, setYtCategory] = useState("");
-  const [ytDomain, setYtDomain] = useState("");
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
-  const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const [lastEntry, setLastEntry] = useState<VideoEntry | null>(null);
 
   const [db, setDb] = useState<VideoEntry[]>([]);
@@ -228,25 +226,21 @@ export default function EduStreamApp() {
     const ytId = extractYouTubeId(ytUrl.trim());
     if (!ytId) { toast("Enlace de YouTube no válido", "error"); return; }
     if (db.some((e) => e.ytId === ytId)) { toast("Este video ya existe en tu biblioteca", "error"); return; }
-    const title = ytTitle.trim() || undefined;
-    const category = ytCategory.trim() || undefined;
-    const domain = ytDomain.trim() || undefined;
-    const { error, id, embedToken } = await addVideoAction({ ytId, title, category, domain });
+    const title = ytTitle.trim() || "Video sin título";
+    const category = ytCategory.trim() || "Sin categoría";
+    const { error, id } = await addVideoAction({ ytId, title, category });
     if (error || !id) { toast("Error al guardar el video", "error"); return; }
-    const entry: VideoEntry = { id, ytId, title: title ?? "Sin título", category: category ?? "Sin categoría", added: new Date().toISOString() };
+    const entry: VideoEntry = { id, ytId, title, category, added: new Date().toISOString() };
     setDb((prev) => [entry, ...prev]);
-    // Build embed link with signed token
-    const baseLink = platformLink(id);
-    const linkWithToken = embedToken ? `${baseLink}?token=${embedToken}` : baseLink;
-    setGeneratedLink(linkWithToken);
-    setGeneratedToken(embedToken ?? null);
+    const link = platformLink(id);
+    setGeneratedLink(link);
     setLastEntry(entry);
     toast("Video añadido correctamente");
   }
 
   function clearForm() {
-    setYtUrl(""); setYtTitle(""); setYtCategory(""); setYtDomain("");
-    setGeneratedLink(null); setGeneratedToken(null); setLastEntry(null);
+    setYtUrl(""); setYtTitle(""); setYtCategory("");
+    setGeneratedLink(null); setLastEntry(null);
   }
 
   async function deleteVideo(id: string) {
@@ -440,7 +434,7 @@ export default function EduStreamApp() {
             <div className="card">
               <div className="input-row">
                 <div className="input-group full">
-                  <label htmlFor="yt-url">Enlace de YouTube *</label>
+                  <label htmlFor="yt-url">Enlace de YouTube</label>
                   <input id="yt-url" type="text" placeholder="https://youtube.com/watch?v=..." value={ytUrl} onChange={(e) => setYtUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addVideo()} />
                 </div>
                 <div className="input-group">
@@ -451,16 +445,6 @@ export default function EduStreamApp() {
                   <label htmlFor="yt-cat">Categoría (opcional)</label>
                   <input id="yt-cat" type="text" placeholder="Ej: Matemáticas, Historia..." value={ytCategory} onChange={(e) => setYtCategory(e.target.value)} />
                 </div>
-                <div className="input-group full">
-                  <label htmlFor="yt-domain">Dominio permitido (opcional)</label>
-                  <input
-                    id="yt-domain"
-                    type="text"
-                    placeholder="miacademia.com — dejar vacío para permitir cualquier dominio"
-                    value={ytDomain}
-                    onChange={(e) => setYtDomain(e.target.value)}
-                  />
-                </div>
               </div>
               <div className="actions">
                 <button className="btn btn-primary" onClick={addVideo}>Generar enlace</button>
@@ -468,20 +452,10 @@ export default function EduStreamApp() {
               </div>
               {generatedLink && lastEntry && (
                 <div className="link-result">
-                  <div className="link-result-label">Enlace embed generado</div>
+                  <div className="link-result-label">Enlace generado</div>
                   <div className="link-result-url">{generatedLink}</div>
-                  {generatedToken && ytDomain.trim() && (
-                    <div style={{ marginTop: 10, fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.5 }}>
-                      Restringido a: <strong style={{ color: "var(--accent)" }}>{ytDomain.trim()}</strong> — el enlace solo funcionara desde ese dominio.
-                    </div>
-                  )}
-                  {!ytDomain.trim() && (
-                    <div style={{ marginTop: 10, fontSize: "0.78rem", color: "var(--muted)" }}>
-                      Sin restriccion de dominio — funciona en cualquier sitio.
-                    </div>
-                  )}
                   <div className="actions" style={{ marginTop: "16px" }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => navigator.clipboard.writeText(generatedLink).then(() => toast("Enlace copiado"))}>Copiar enlace</button>
+                    <button className="btn btn-primary btn-sm" onClick={() => copyLink(lastEntry.id)}>Copiar enlace</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => openPlayerEntry(lastEntry)}>Reproducir</button>
                     <button className="btn btn-ghost btn-sm" onClick={clearForm}>Nuevo video</button>
                   </div>

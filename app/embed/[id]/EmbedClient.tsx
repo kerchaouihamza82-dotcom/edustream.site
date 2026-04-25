@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 function fmt(s) {
   const t = Math.floor(s || 0);
@@ -9,6 +10,9 @@ function fmt(s) {
 }
 
 export default function EmbedClient({ ytId, title, embedId }) {
+  const searchParams  = useSearchParams();
+  const startAt       = parseInt(searchParams.get("t") ?? "0", 10) || 0;
+
   const playerRef    = useRef(null);
   const timerRef     = useRef(null);
   const wrapRef      = useRef(null);
@@ -91,6 +95,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
           fs: 0,
           iv_load_policy: 3,
           playsinline: 1,
+          start: startAt > 0 ? startAt : undefined,
           mute: mobile ? 1 : 0,
         },
         events: {
@@ -163,7 +168,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
     } catch (_) {}
   };
 
-  const toggleFs = () => {
+  const toggleFs = async () => {
     keepAlive();
 
     const el = wrapRef.current;
@@ -189,23 +194,23 @@ export default function EmbedClient({ ytId, title, embedId }) {
     }
 
     // --- iOS Safari ---
-    // requestFullscreen() on a div is blocked by Apple inside iframes.
-    // BUT: calling webkitRequestFullscreen() directly on the YouTube <iframe> element
-    // triggers the native iOS video player fullscreen — video keeps playing, no reset.
-    // We get the iframe via the YouTube IFrame API's getIframe() method.
+    // No fullscreen API works on a div or cross-origin iframe inside an iOS Safari iframe.
+    // Solution: navigate to the embed URL as a top-level Safari page (fills the entire screen).
+    // A short-lived signed token (15 min) is fetched from the server and added to the URL.
+    // If someone copies and shares the URL, it expires in 15 minutes and stops working.
     if (isIOS) {
+      const currentTime = Math.floor(playerRef.current?.getCurrentTime?.() ?? 0);
       try {
-        const p = playerRef.current;
-        if (p && typeof p.getIframe === "function") {
-          const ytIframe = p.getIframe() as any;
-          if (ytIframe && typeof ytIframe.webkitRequestFullscreen === "function") {
-            ytIframe.webkitRequestFullscreen();
-            return;
-          }
+        const res = await fetch(`/api/embed-token?videoId=${embedId}`);
+        const data = await res.json();
+        if (data.token) {
+          const sep = currentTime > 0 ? `?token=${data.token}&t=${currentTime}` : `?token=${data.token}`;
+          window.location.href = `${embedUrl}${sep}`;
+          return;
         }
       } catch (_) {}
-      // Fallback: navigate to embed as top-level page (video will restart but fullscreen works)
-      window.location.href = embedUrl;
+      // Fallback without token if fetch fails
+      window.location.href = `${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`;
       return;
     }
 

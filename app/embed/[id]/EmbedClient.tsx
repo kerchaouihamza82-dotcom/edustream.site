@@ -194,24 +194,34 @@ export default function EmbedClient({ ytId, title, embedId }) {
     }
 
     // --- iOS Safari ---
-    // No fullscreen API works on a div or cross-origin iframe inside an iOS Safari iframe.
-    // Solution: navigate to the embed URL as a top-level Safari page (fills the entire screen).
-    // A short-lived signed token (15 min) is fetched from the server and added to the URL.
-    // If someone copies and shares the URL, it expires in 15 minutes and stops working.
+    // window.open() inside an iframe is blocked by iOS Safari as a popup.
+    // The only reliable way to open a new tab from inside an iframe on iOS is
+    // to create a hidden <a target="_blank"> and click it programmatically —
+    // Safari treats anchor clicks as trusted navigation even inside iframes.
     if (isIOS) {
       const currentTime = Math.floor(playerRef.current?.getCurrentTime?.() ?? 0);
+
+      const openUrl = (url: string) => {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      };
+
       try {
         const res = await fetch(`/api/embed-token?videoId=${embedId}`);
         const data = await res.json();
         if (data.token) {
-          const sep = currentTime > 0 ? `?token=${data.token}&t=${currentTime}` : `?token=${data.token}`;
-          // window.open with "_blank" opens a NEW Safari tab — not inside the iframe
-          window.open(`${embedUrl}${sep}`, "_blank");
+          const qs = currentTime > 0 ? `?token=${data.token}&t=${currentTime}` : `?token=${data.token}`;
+          openUrl(`${embedUrl}${qs}`);
           return;
         }
       } catch (_) {}
-      // Fallback without token if fetch fails
-      window.open(`${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`, "_blank");
+      // Fallback: open without token if API fails
+      openUrl(`${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`);
       return;
     }
 

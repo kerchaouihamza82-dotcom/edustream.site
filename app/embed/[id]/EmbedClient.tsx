@@ -189,21 +189,22 @@ export default function EmbedClient({ ytId, title, embedId }) {
     }
 
     // --- iOS Safari ---
-    // requestFullscreen() is blocked by Apple inside iframes.
-    // However, webkitEnterFullscreen() called directly on a <video> element works
-    // even cross-origin — iOS grants this because it's a direct user gesture on the video element.
-    // This opens the native iOS video player fullscreen without leaving the page.
+    // requestFullscreen() on a div is blocked by Apple inside iframes.
+    // BUT: calling webkitRequestFullscreen() directly on the YouTube <iframe> element
+    // triggers the native iOS video player fullscreen — video keeps playing, no reset.
+    // We get the iframe via the YouTube IFrame API's getIframe() method.
     if (isIOS) {
       try {
-        const ytIframe = document.querySelector("#yt-player iframe") as HTMLIFrameElement | null;
-        // Try to reach the <video> inside the YouTube iframe (may be cross-origin blocked)
-        const video = ytIframe?.contentDocument?.querySelector("video") as any;
-        if (video && typeof video.webkitEnterFullscreen === "function") {
-          video.webkitEnterFullscreen();
-          return;
+        const p = playerRef.current;
+        if (p && typeof p.getIframe === "function") {
+          const ytIframe = p.getIframe() as any;
+          if (ytIframe && typeof ytIframe.webkitRequestFullscreen === "function") {
+            ytIframe.webkitRequestFullscreen();
+            return;
+          }
         }
       } catch (_) {}
-      // If cross-origin access is blocked, navigate to embed as top-level page (fallback).
+      // Fallback: navigate to embed as top-level page (video will restart but fullscreen works)
       window.location.href = embedUrl;
       return;
     }

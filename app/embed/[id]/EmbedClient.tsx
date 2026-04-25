@@ -17,6 +17,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
   const timerRef     = useRef(null);
   const wrapRef      = useRef(null);
   const hideTimerRef = useRef(null);
+  const iosTokenRef  = useRef<string | null>(null); // pre-fetched 15-min token for iOS
 
 
   const [playing,      setPlaying]      = useState(false);
@@ -31,6 +32,24 @@ export default function EmbedClient({ ytId, title, embedId }) {
   useEffect(() => {
     setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
   }, []);
+
+  // Pre-fetch a 15-min signed token on mount so the iOS click handler is synchronous.
+  // iOS Safari blocks window.open / anchor clicks that happen after an async await.
+  // By pre-fetching, the click fires instantly without any await in the critical path.
+  useEffect(() => {
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!isIOS || !embedId) return;
+    const fetchToken = () => {
+      fetch(`/api/embed-token?videoId=${embedId}`)
+        .then((r) => r.json())
+        .then((data) => { if (data.token) iosTokenRef.current = data.token; })
+        .catch(() => {});
+    };
+    fetchToken();
+    // Refresh token every 10 minutes so it never expires while user watches
+    const interval = setInterval(fetchToken, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [embedId]);
 
 
 
@@ -168,7 +187,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
     } catch (_) {}
   };
 
-  const toggleFs = async () => {
+  const toggleFs = () => {
     keepAlive();
 
     const el = wrapRef.current;
@@ -194,34 +213,25 @@ export default function EmbedClient({ ytId, title, embedId }) {
     }
 
     // --- iOS Safari ---
-    // window.open() inside an iframe is blocked by iOS Safari as a popup.
-    // The only reliable way to open a new tab from inside an iframe on iOS is
-    // to create a hidden <a target="_blank"> and click it programmatically —
-    // Safari treats anchor clicks as trusted navigation even inside iframes.
+    // The token is pre-fetched on mount (iosTokenRef) so this handler is fully synchronous.
+    // Safari only allows window.open / anchor clicks inside iframes when called synchronously
+    // from a user gesture — any await breaks the gesture chain and Safari blocks the popup.
     if (isIOS) {
       const currentTime = Math.floor(playerRef.current?.getCurrentTime?.() ?? 0);
+      const token = iosTokenRef.current;
+      const qs = token
+        ? (currentTime > 0 ? `?token=${token}&t=${currentTime}` : `?token=${token}`)
+        : (currentTime > 0 ? `?t=${currentTime}` : "");
+      const fullUrl = `${embedUrl}${qs}`;
 
-      const openUrl = (url: string) => {
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      };
-
-      try {
-        const res = await fetch(`/api/embed-token?videoId=${embedId}`);
-        const data = await res.json();
-        if (data.token) {
-          const qs = currentTime > 0 ? `?token=${data.token}&t=${currentTime}` : `?token=${data.token}`;
-          openUrl(`${embedUrl}${qs}`);
-          return;
-        }
-      } catch (_) {}
-      // Fallback: open without token if API fails
-      openUrl(`${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`);
+      // Synchronous anchor click — trusted by Safari even inside an iframe
+      const a = document.createElement("a");
+      a.href = fullUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       return;
     }
 

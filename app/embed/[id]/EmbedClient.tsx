@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 function fmt(s) {
   const t = Math.floor(s || 0);
@@ -9,6 +10,9 @@ function fmt(s) {
 }
 
 export default function EmbedClient({ ytId, title, embedId }) {
+  const searchParams  = useSearchParams();
+  const startAt       = parseInt(searchParams.get("t") ?? "0", 10) || 0;
+
   const playerRef    = useRef(null);
   const timerRef     = useRef(null);
   const wrapRef      = useRef(null);
@@ -91,6 +95,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
           fs: 0,
           iv_load_policy: 3,
           playsinline: 1,
+          start: startAt > 0 ? startAt : undefined,
           mute: mobile ? 1 : 0,
         },
         events: {
@@ -189,23 +194,14 @@ export default function EmbedClient({ ytId, title, embedId }) {
     }
 
     // --- iOS Safari ---
-    // requestFullscreen() on a div is blocked by Apple inside iframes.
-    // BUT: calling webkitRequestFullscreen() directly on the YouTube <iframe> element
-    // triggers the native iOS video player fullscreen — video keeps playing, no reset.
-    // We get the iframe via the YouTube IFrame API's getIframe() method.
+    // No fullscreen API works on a div or cross-origin iframe inside an iOS Safari iframe.
+    // Best achievable solution: navigate this window to the embed URL with the current
+    // playback time as ?t= parameter, so the video resumes from where it was.
+    // The embed page loads as a top-level Safari document (fills the entire screen),
+    // and the user presses the browser Back button to return to the academy.
     if (isIOS) {
-      try {
-        const p = playerRef.current;
-        if (p && typeof p.getIframe === "function") {
-          const ytIframe = p.getIframe() as any;
-          if (ytIframe && typeof ytIframe.webkitRequestFullscreen === "function") {
-            ytIframe.webkitRequestFullscreen();
-            return;
-          }
-        }
-      } catch (_) {}
-      // Fallback: navigate to embed as top-level page (video will restart but fullscreen works)
-      window.location.href = embedUrl;
+      const currentTime = Math.floor(playerRef.current?.getCurrentTime?.() ?? 0);
+      window.location.href = `${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`;
       return;
     }
 

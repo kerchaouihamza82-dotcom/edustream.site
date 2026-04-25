@@ -168,7 +168,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
     } catch (_) {}
   };
 
-  const toggleFs = () => {
+  const toggleFs = async () => {
     keepAlive();
 
     const el = wrapRef.current;
@@ -195,12 +195,21 @@ export default function EmbedClient({ ytId, title, embedId }) {
 
     // --- iOS Safari ---
     // No fullscreen API works on a div or cross-origin iframe inside an iOS Safari iframe.
-    // Best achievable solution: navigate this window to the embed URL with the current
-    // playback time as ?t= parameter, so the video resumes from where it was.
-    // The embed page loads as a top-level Safari document (fills the entire screen),
-    // and the user presses the browser Back button to return to the academy.
+    // Solution: navigate to the embed URL as a top-level Safari page (fills the entire screen).
+    // A short-lived signed token (15 min) is fetched from the server and added to the URL.
+    // If someone copies and shares the URL, it expires in 15 minutes and stops working.
     if (isIOS) {
       const currentTime = Math.floor(playerRef.current?.getCurrentTime?.() ?? 0);
+      try {
+        const res = await fetch(`/api/embed-token?videoId=${embedId}`);
+        const data = await res.json();
+        if (data.token) {
+          const sep = currentTime > 0 ? `?token=${data.token}&t=${currentTime}` : `?token=${data.token}`;
+          window.location.href = `${embedUrl}${sep}`;
+          return;
+        }
+      } catch (_) {}
+      // Fallback without token if fetch fails
       window.location.href = `${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`;
       return;
     }

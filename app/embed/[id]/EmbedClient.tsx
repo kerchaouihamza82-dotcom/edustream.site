@@ -205,12 +205,13 @@ export default function EmbedClient({ ytId, title, embedId }) {
         const data = await res.json();
         if (data.token) {
           const sep = currentTime > 0 ? `?token=${data.token}&t=${currentTime}` : `?token=${data.token}`;
-          window.location.href = `${embedUrl}${sep}`;
+          // window.open with "_blank" opens a NEW Safari tab — not inside the iframe
+          window.open(`${embedUrl}${sep}`, "_blank");
           return;
         }
       } catch (_) {}
       // Fallback without token if fetch fails
-      window.location.href = `${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`;
+      window.open(`${embedUrl}${currentTime > 0 ? `?t=${currentTime}` : ""}`, "_blank");
       return;
     }
 

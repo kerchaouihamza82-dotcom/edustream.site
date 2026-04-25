@@ -169,36 +169,18 @@ export default function EmbedClient({ ytId, title, embedId }) {
     const el = wrapRef.current;
     if (!el) return;
 
-    // Detect environment constraints:
-    //
-    // 1. iOS Safari completely blocks requestFullscreen() on any element inside an iframe.
-    //    This is an Apple OS-level restriction with no workaround from within the iframe.
-    //    Source: https://webkit.org/blog/7950/pure-css-crossword/
-    //
-    // 2. When running inside a nested iframe (window.self !== window.top), fullscreen
-    //    APIs may be blocked unless the parent iframe has allow="fullscreen" attribute.
-    //    We cannot control or read the parent iframe attributes (cross-origin restriction).
-    //
-    // 3. requestFullscreen() is async and can be rejected silently on some browsers/contexts.
-    //    We always attach a .catch() to trigger the fallback automatically.
-    //
-    // FALLBACK STRATEGY: navigate to the embed URL directly in the current window.
-    // This breaks out of the iframe context, making the page a top-level document
-    // where fullscreen works natively on all browsers including iOS Safari.
-    // The user can use the browser back button to return to the academy.
-
-    const isInsideIframe = window.self !== window.top;
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
     const embedUrl = `https://edustream.site/embed/${embedId}`;
 
-    // Already in fullscreen — exit
+    // --- Exit fullscreen ---
     const inFs = !!(
       document.fullscreenElement ||
       (document as any).webkitFullscreenElement ||
       (document as any).mozFullScreenElement
     );
     if (inFs) {
-      const exit = document.exitFullscreen ||
+      const exit =
+        document.exitFullscreen ||
         (document as any).webkitExitFullscreen ||
         (document as any).mozCancelFullScreen;
       if (exit) exit.call(document);
@@ -206,17 +188,19 @@ export default function EmbedClient({ ytId, title, embedId }) {
       return;
     }
 
-    // iOS or nested iframe: requestFullscreen will fail or is blocked.
-    // Navigate directly to the embed URL as a top-level page (fallback).
-    // LIMITATION: this cannot be solved technically from within the iframe —
-    // iOS and browser security prevent any other approach.
-    if (isIOS || isInsideIframe) {
+    // --- iOS Safari ---
+    // requestFullscreen() is completely blocked by Apple inside any iframe.
+    // The only working approach: navigate this window to the embed URL directly.
+    // The embed page loads as a top-level document (fills the whole screen),
+    // and the user presses the browser Back button to return to the academy.
+    if (isIOS) {
       window.location.href = embedUrl;
       return;
     }
 
-    // Desktop / Android outside iframe: use standard requestFullscreen.
-    // On failure (rejected promise), automatically trigger the fallback.
+    // --- Desktop & Android ---
+    // Try requestFullscreen on the wrapper element.
+    // If rejected (e.g. parent iframe lacks allow="fullscreen"), fall back to navigation.
     const enter =
       el.requestFullscreen ||
       (el as any).webkitRequestFullscreen ||
@@ -227,12 +211,9 @@ export default function EmbedClient({ ytId, title, embedId }) {
       (enter.call(el) as Promise<void>)
         .then(() => setIsFs(true))
         .catch(() => {
-          // requestFullscreen was rejected (e.g. permission policy, user gesture lost).
-          // Fallback: navigate to embed as top-level page.
           window.location.href = embedUrl;
         });
     } else {
-      // Browser has no fullscreen API at all — fallback.
       window.location.href = embedUrl;
     }
   };

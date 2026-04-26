@@ -89,7 +89,14 @@ export default function EmbedClient({ ytId, title, embedId }) {
     }
     setShowControls((prev) => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      if (!prev) scheduleHide();
+      if (!prev) {
+        // Revealing: schedule auto-hide only if currently playing
+        try {
+          const state = playerRef.current?.getPlayerState?.();
+          const YT = (window as any).YT;
+          if (YT && state === YT.PlayerState.PLAYING) scheduleHide();
+        } catch (_) { scheduleHide(); }
+      }
       return !prev;
     });
   };
@@ -147,10 +154,15 @@ export default function EmbedClient({ ytId, title, embedId }) {
             const isPlaying = e.data === YT.PlayerState.PLAYING;
             const isPaused  = e.data === YT.PlayerState.PAUSED;
             setPlaying(isPlaying);
-            // Keep controls visible while paused so YouTube's own UI never shows
             if (isPaused) {
+              // Keep controls visible while paused — YouTube shows its own UI otherwise
               if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
               setShowControls(true);
+            }
+            if (isPlaying) {
+              // Auto-hide controls after HIDE_DELAY when video starts/resumes playing
+              setShowControls(true);
+              scheduleHide();
             }
             if (e.data === YT.PlayerState.ENDED) {
               if (timerRef.current) clearInterval(timerRef.current);
@@ -290,9 +302,9 @@ export default function EmbedClient({ ytId, title, embedId }) {
     background: primary ? "#e8ff47" : "rgba(255,255,255,.12)",
     border: `1px solid ${primary ? "#e8ff47" : "rgba(255,255,255,.2)"}`,
     color: primary ? "#000" : "#fff",
-    borderRadius: 6,
-    padding: isMobile ? "6px 10px" : "8px 14px",
-    fontSize: isMobile ? ".72rem" : ".8rem",
+    borderRadius: 5,
+    padding: isMobile ? "4px 8px" : "8px 14px",
+    fontSize: isMobile ? ".68rem" : ".8rem",
     fontWeight: 700,
     cursor: "pointer",
     fontFamily: "inherit",
@@ -337,7 +349,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
         onMouseMove={isMobile ? undefined : revealControls}
         onMouseEnter={isMobile ? undefined : revealControls}
         onMouseLeave={isMobile ? undefined : scheduleHide}
-        onTouchStart={isMobile ? handleTouch : undefined}
+        onTouchEnd={isMobile ? handleTouch : undefined}
         onClick={isMobile ? undefined : togglePlay}
       />
 

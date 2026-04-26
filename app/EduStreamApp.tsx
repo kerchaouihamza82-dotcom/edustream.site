@@ -710,7 +710,23 @@ export default function EduStreamApp() {
                         <div style={{ padding: 14 }}>
                           <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "#fff", marginBottom: 8, lineHeight: 1.4 }}>{link.title}</div>
                           <div style={{ display: "flex", gap: 8 }}>
-                            <a href={link.url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, textAlign: "center", padding: "6px 0", borderRadius: 6, background: "#e8ff47", color: "#000", fontWeight: 700, fontSize: "0.8rem", textDecoration: "none" }}>Ver video</a>
+                            <button
+                              onClick={() => {
+                                if (!link.ytId) return;
+                                // Find matching video in db, or create a temporary entry
+                                const existing = db.find((e) => e.ytId === link.ytId);
+                                openPlayerEntry(existing ?? {
+                                  id: link.id,
+                                  ytId: link.ytId,
+                                  title: link.title,
+                                  category: openCatalog?.name ?? "",
+                                  added: new Date().toISOString(),
+                                });
+                              }}
+                              style={{ flex: 1, textAlign: "center", padding: "6px 0", borderRadius: 6, background: "#e8ff47", color: "#000", fontWeight: 700, fontSize: "0.8rem", border: "none", cursor: "pointer" }}
+                            >
+                              Ver video
+                            </button>
                             <button onClick={() => deleteLinkFromCatalog(link.id)} style={{ padding: "6px 12px", borderRadius: 6, background: "transparent", color: "#e55", border: "1px solid #e55", fontSize: "0.8rem", cursor: "pointer" }}>Quitar</button>
                           </div>
                         </div>

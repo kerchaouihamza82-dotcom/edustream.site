@@ -304,6 +304,8 @@ export default function EmbedClient({ ytId, title, embedId }) {
   return (
     <div
       ref={wrapRef}
+      onMouseMove={isMobile ? undefined : revealControls}
+      onMouseEnter={isMobile ? undefined : revealControls}
       style={{
         position: "fixed",
         top: 0,
@@ -322,15 +324,17 @@ export default function EmbedClient({ ytId, title, embedId }) {
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
       />
 
-      {/* Transparent overlay — captures mouse/touch events over the YouTube iframe.
-          The iframe absorbs pointer events by default, so this div sits on top
-          and routes all interactions (hover, click, touch) to our custom controls. */}
+      {/* Click/touch capture overlay — sits above the YouTube iframe.
+          When controls are hidden: captures click to reveal controls + toggle play.
+          When controls are visible: pointerEvents none so clicks reach the buttons.
+          Mouse movement is handled by the wrapper div above so it always fires. */}
       <div
-        style={{ position: "absolute", inset: 0, zIndex: 5, background: "transparent" }}
-        onMouseMove={isMobile ? undefined : revealControls}
-        onMouseEnter={isMobile ? undefined : revealControls}
+        style={{
+          position: "absolute", inset: 0, zIndex: 5, background: "transparent",
+          pointerEvents: showControls ? "none" : "auto",
+        }}
         onTouchStart={isMobile ? handleTouch : undefined}
-        onClick={isMobile ? undefined : togglePlay}
+        onClick={isMobile ? undefined : () => { revealControls(); togglePlay(); }}
       />
 
       {/* Controls overlay */}

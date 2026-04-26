@@ -57,7 +57,19 @@ export default function EmbedClient({ ytId, title, embedId }) {
 
   const scheduleHide = () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => setShowControls(false), HIDE_DELAY);
+    // Never auto-hide when paused — YouTube shows its own UI when paused and controls are hidden
+    hideTimerRef.current = setTimeout(() => {
+      setShowControls((prev) => {
+        // Keep controls visible if video is paused
+        if (!playerRef.current) return false;
+        try {
+          const state = playerRef.current.getPlayerState?.();
+          const YT = (window as any).YT;
+          if (YT && state === YT.PlayerState.PAUSED) return true;
+        } catch (_) {}
+        return false;
+      });
+    }, HIDE_DELAY);
   };
 
   const revealControls = () => {
@@ -132,7 +144,14 @@ export default function EmbedClient({ ytId, title, embedId }) {
           },
           onStateChange: (e) => {
             const YT = window.YT;
-            setPlaying(e.data === YT.PlayerState.PLAYING);
+            const isPlaying = e.data === YT.PlayerState.PLAYING;
+            const isPaused  = e.data === YT.PlayerState.PAUSED;
+            setPlaying(isPlaying);
+            // Keep controls visible while paused so YouTube's own UI never shows
+            if (isPaused) {
+              if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+              setShowControls(true);
+            }
             if (e.data === YT.PlayerState.ENDED) {
               if (timerRef.current) clearInterval(timerRef.current);
               setProgress(100);
@@ -285,8 +304,6 @@ export default function EmbedClient({ ytId, title, embedId }) {
   return (
     <div
       ref={wrapRef}
-      onMouseMove={isMobile ? undefined : revealControls}
-      onTouchStart={isMobile ? handleTouch : undefined}
       style={{
         position: "fixed",
         top: 0,
@@ -302,7 +319,18 @@ export default function EmbedClient({ ytId, title, embedId }) {
       {/* YouTube player */}
       <div
         id="yt-player"
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+      />
+
+      {/* Transparent overlay — captures mouse/touch events over the YouTube iframe.
+          The iframe absorbs pointer events by default, so this div sits on top
+          and routes all interactions (hover, click, touch) to our custom controls. */}
+      <div
+        style={{ position: "absolute", inset: 0, zIndex: 5, background: "transparent" }}
+        onMouseMove={isMobile ? undefined : revealControls}
+        onMouseEnter={isMobile ? undefined : revealControls}
+        onTouchStart={isMobile ? handleTouch : undefined}
+        onClick={isMobile ? undefined : togglePlay}
       />
 
       {/* Controls overlay */}

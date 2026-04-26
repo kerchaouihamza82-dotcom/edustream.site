@@ -304,8 +304,6 @@ export default function EmbedClient({ ytId, title, embedId }) {
   return (
     <div
       ref={wrapRef}
-      onMouseMove={isMobile ? undefined : revealControls}
-      onMouseEnter={isMobile ? undefined : revealControls}
       style={{
         position: "fixed",
         top: 0,
@@ -318,26 +316,34 @@ export default function EmbedClient({ ytId, title, embedId }) {
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}
     >
-      {/* YouTube player */}
+      {/* YouTube player — pointerEvents none so it NEVER receives direct user interaction.
+          All clicks/hovers are handled by the overlay above it. This prevents YouTube's
+          native controls from appearing on click or pause. */}
       <div
         id="yt-player"
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
       />
 
-      {/* Click/touch capture overlay — sits above the YouTube iframe.
-          When controls are hidden: captures click to reveal controls + toggle play.
-          When controls are visible: pointerEvents none so clicks reach the buttons.
-          Mouse movement is handled by the wrapper div above so it always fires. */}
+      {/* Interaction overlay — ALWAYS pointerEvents auto, covers the entire player.
+          This is the single source of truth for all user interaction.
+          It NEVER toggles pointerEvents so hover is always consistent across
+          multiple enter/leave cycles. Clicks are routed to togglePlay.
+          The controls buttons sit above this at zIndex 10 and handle their own clicks. */}
       <div
         style={{
           position: "absolute", inset: 0, zIndex: 5, background: "transparent",
-          pointerEvents: showControls ? "none" : "auto",
+          pointerEvents: "auto",
         }}
+        onMouseMove={isMobile ? undefined : revealControls}
+        onMouseEnter={isMobile ? undefined : revealControls}
+        onMouseLeave={isMobile ? undefined : scheduleHide}
         onTouchStart={isMobile ? handleTouch : undefined}
-        onClick={isMobile ? undefined : () => { revealControls(); togglePlay(); }}
+        onClick={isMobile ? undefined : togglePlay}
       />
 
-      {/* Controls overlay */}
+      {/* Controls overlay — pointerEvents none on the container so the interaction
+          overlay beneath (zIndex 5) still receives onMouseMove/onMouseLeave.
+          Individual buttons set pointerEvents auto to handle their own clicks. */}
       <div style={{
         position: "absolute", inset: 0, zIndex: 10,
         display: "flex", flexDirection: "column", justifyContent: "flex-end",

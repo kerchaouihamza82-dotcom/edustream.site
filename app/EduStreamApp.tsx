@@ -16,6 +16,19 @@ interface VideoEntry {
 
 type View = "add" | "library" | "player";
 
+interface Catalog {
+  id: string;
+  name: string;
+  links: CatalogLink[];
+}
+
+interface CatalogLink {
+  id: string;
+  title: string;
+  url: string;
+  ytId: string | null;
+}
+
 /* ─── Helpers ──────────────────────────────────────────────── */
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -95,6 +108,15 @@ export default function EduStreamApp() {
   const [db, setDb] = useState<VideoEntry[]>([]);
   const [filter, setFilter] = useState("");
 
+  // ── Catalogs ──────────────────────────────
+  const [libView, setLibView] = useState<"videos" | "catalogs">("videos");
+  const [catalogs, setCatalogs] = useState<Catalog[]>([]);
+  const [openCatalog, setOpenCatalog] = useState<Catalog | null>(null);
+  const [newCatalogName, setNewCatalogName] = useState("");
+  const [showNewCatalog, setShowNewCatalog] = useState(false);
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [newLinkTitle, setNewLinkTitle] = useState("");
+
   const [currentEntry, setCurrentEntry] = useState<VideoEntry | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -119,6 +141,53 @@ export default function EduStreamApp() {
     },
     []
   );
+
+  /* ─── Catalog helpers ────────────────────── */
+  function createCatalog() {
+    const name = newCatalogName.trim();
+    if (!name) return;
+    const catalog: Catalog = { id: genId(), name, links: [] };
+    setCatalogs((prev) => [...prev, catalog]);
+    setNewCatalogName("");
+    setShowNewCatalog(false);
+    toast("Catálogo creado");
+  }
+
+  function deleteCatalog(id: string) {
+    setCatalogs((prev) => prev.filter((c) => c.id !== id));
+    if (openCatalog?.id === id) setOpenCatalog(null);
+  }
+
+  function addLinkToCatalog() {
+    const url = newLinkUrl.trim();
+    const title = newLinkTitle.trim();
+    if (!url || !openCatalog) return;
+    const ytId = extractYouTubeId(url);
+    const link: CatalogLink = {
+      id: genId(),
+      title: title || url,
+      url,
+      ytId,
+    };
+    const updated = catalogs.map((c) =>
+      c.id === openCatalog.id ? { ...c, links: [...c.links, link] } : c
+    );
+    setCatalogs(updated);
+    setOpenCatalog(updated.find((c) => c.id === openCatalog.id) ?? null);
+    setNewLinkUrl("");
+    setNewLinkTitle("");
+    toast("Enlace añadido");
+  }
+
+  function deleteLinkFromCatalog(linkId: string) {
+    const updated = catalogs.map((c) =>
+      c.id === openCatalog?.id
+        ? { ...c, links: c.links.filter((l) => l.id !== linkId) }
+        : c
+    );
+    setCatalogs(updated);
+    setOpenCatalog(updated.find((c) => c.id === openCatalog?.id) ?? null);
+  }
 
   /* ─── Load videos from Supabase ─────────── */
   useEffect(() => {
@@ -469,40 +538,187 @@ export default function EduStreamApp() {
         {view === "library" && (
           <main>
             <div className="section-label">Contenido guardado</div>
-            <h1 className="section-title">Biblioteca</h1>
-            <div className="stats-bar">
-              <div className="stat"><div className="stat-value">{db.length}</div><div className="stat-label">Videos</div></div>
-              <div className="stat"><div className="stat-value">{categories}</div><div className="stat-label">Categorías</div></div>
-            </div>
-            <div className="search-bar">
-              <input type="text" placeholder="Buscar por título o categoría..." value={filter} onChange={(e) => setFilter(e.target.value)} />
-            </div>
-            {db.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">📚</div>
-                <div className="empty-title">La biblioteca está vacía</div>
-                <div className="empty-desc">Añade tu primer video desde la pestaña &quot;Añadir&quot;.</div>
+
+            {/* Header row with tabs and action button */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => { setLibView("videos"); setOpenCatalog(null); }}
+                  style={{ padding: "8px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, fontSize: "0.9rem", background: libView === "videos" ? "#e8ff47" : "#1a1a22", color: libView === "videos" ? "#000" : "#aaa" }}
+                >
+                  Videos
+                </button>
+                <button
+                  onClick={() => setLibView("catalogs")}
+                  style={{ padding: "8px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, fontSize: "0.9rem", background: libView === "catalogs" ? "#e8ff47" : "#1a1a22", color: libView === "catalogs" ? "#000" : "#aaa" }}
+                >
+                  Mis Catalogos
+                </button>
               </div>
-            ) : (
-              <div className="grid">
-                {filteredDb.map((entry) => (
-                  <div key={entry.id} className="video-card">
-                    <div className="thumb-wrap" onClick={() => openPlayerEntry(entry)}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={thumbUrl(entry.ytId)} alt={entry.title} loading="lazy" />
-                      <div className="play-overlay"><div className="play-icon">&#9654;</div></div>
-                    </div>
-                    <div className="video-info" onClick={() => openPlayerEntry(entry)}>
-                      <div className="video-title">{entry.title}</div>
-                      <div className="video-cat"><span>{entry.category}</span><span className="badge">{entry.category}</span></div>
-                    </div>
-                    <div className="card-actions">
-                      <button className="btn btn-ghost btn-sm" onClick={() => copyLink(entry.id)}>Copiar enlace</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => deleteVideo(entry.id)}>Eliminar</button>
-                    </div>
+
+              {libView === "catalogs" && !openCatalog && (
+                <button
+                  onClick={() => setShowNewCatalog(true)}
+                  style={{ padding: "8px 20px", borderRadius: 8, background: "#e8ff47", color: "#000", border: "none", fontWeight: 700, fontSize: "0.9rem", cursor: "pointer" }}
+                >
+                  + Crear catalogo
+                </button>
+              )}
+              {libView === "catalogs" && openCatalog && (
+                <button
+                  onClick={() => setOpenCatalog(null)}
+                  style={{ padding: "8px 18px", borderRadius: 8, background: "#1a1a22", color: "#aaa", border: "none", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}
+                >
+                  &larr; Volver
+                </button>
+              )}
+            </div>
+
+            {/* ── VIDEOS TAB ── */}
+            {libView === "videos" && (
+              <>
+                <div className="stats-bar">
+                  <div className="stat"><div className="stat-value">{db.length}</div><div className="stat-label">Videos</div></div>
+                  <div className="stat"><div className="stat-value">{categories}</div><div className="stat-label">Categorias</div></div>
+                </div>
+                <div className="search-bar">
+                  <input type="text" placeholder="Buscar por titulo o categoria..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+                </div>
+                {db.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-title">La biblioteca esta vacia</div>
+                    <div className="empty-desc">Añade tu primer video desde la pestaña &quot;Añadir&quot;.</div>
                   </div>
-                ))}
-              </div>
+                ) : (
+                  <div className="grid">
+                    {filteredDb.map((entry) => (
+                      <div key={entry.id} className="video-card">
+                        <div className="thumb-wrap" onClick={() => openPlayerEntry(entry)}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={thumbUrl(entry.ytId)} alt={entry.title} loading="lazy" />
+                          <div className="play-overlay"><div className="play-icon">&#9654;</div></div>
+                        </div>
+                        <div className="video-info" onClick={() => openPlayerEntry(entry)}>
+                          <div className="video-title">{entry.title}</div>
+                          <div className="video-cat"><span>{entry.category}</span></div>
+                        </div>
+                        <div className="card-actions">
+                          <button className="btn btn-ghost btn-sm" onClick={() => copyLink(entry.id)}>Copiar enlace</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => deleteVideo(entry.id)}>Eliminar</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── CATALOGS TAB — FOLDER LIST ── */}
+            {libView === "catalogs" && !openCatalog && (
+              <>
+                {/* New catalog form */}
+                {showNewCatalog && (
+                  <div style={{ background: "#1a1a22", borderRadius: 12, padding: 20, marginBottom: 20, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Nombre del catalogo..."
+                      value={newCatalogName}
+                      onChange={(e) => setNewCatalogName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && createCatalog()}
+                      style={{ flex: 1, minWidth: 200, padding: "10px 14px", borderRadius: 8, background: "#0a0a0f", border: "1px solid #2a2a35", color: "#fff", fontSize: "0.95rem", outline: "none" }}
+                    />
+                    <button onClick={createCatalog} style={{ padding: "10px 20px", borderRadius: 8, background: "#e8ff47", color: "#000", border: "none", fontWeight: 700, cursor: "pointer" }}>Crear</button>
+                    <button onClick={() => { setShowNewCatalog(false); setNewCatalogName(""); }} style={{ padding: "10px 16px", borderRadius: 8, background: "#2a2a35", color: "#aaa", border: "none", cursor: "pointer" }}>Cancelar</button>
+                  </div>
+                )}
+
+                {catalogs.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-title">No tienes catalogos</div>
+                    <div className="empty-desc">Pulsa &quot;+ Crear catalogo&quot; para empezar a organizar tus videos.</div>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
+                    {catalogs.map((cat) => (
+                      <div
+                        key={cat.id}
+                        onClick={() => setOpenCatalog(cat)}
+                        style={{ background: "#1a1a22", borderRadius: 12, padding: 20, cursor: "pointer", border: "1px solid #2a2a35", transition: "border-color 0.15s" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#e8ff47")}
+                        onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#2a2a35")}
+                      >
+                        <div style={{ fontSize: 32, marginBottom: 10 }}>&#128193;</div>
+                        <div style={{ fontWeight: 700, fontSize: "1rem", color: "#fff", marginBottom: 6 }}>{cat.name}</div>
+                        <div style={{ fontSize: "0.8rem", color: "#666" }}>{cat.links.length} {cat.links.length === 1 ? "enlace" : "enlaces"}</div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteCatalog(cat.id); }}
+                          style={{ marginTop: 12, padding: "4px 12px", borderRadius: 6, background: "transparent", color: "#e55", border: "1px solid #e55", fontSize: "0.75rem", cursor: "pointer" }}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── CATALOGS TAB — INSIDE A FOLDER ── */}
+            {libView === "catalogs" && openCatalog && (
+              <>
+                <h2 style={{ color: "#e8ff47", fontWeight: 700, fontSize: "1.4rem", marginBottom: 20 }}>{openCatalog.name}</h2>
+
+                {/* Add link form */}
+                <div style={{ background: "#1a1a22", borderRadius: 12, padding: 20, marginBottom: 24 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#aaa", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Añadir enlace de YouTube</div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      placeholder="https://youtube.com/watch?v=..."
+                      value={newLinkUrl}
+                      onChange={(e) => setNewLinkUrl(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addLinkToCatalog()}
+                      style={{ flex: 2, minWidth: 200, padding: "10px 14px", borderRadius: 8, background: "#0a0a0f", border: "1px solid #2a2a35", color: "#fff", fontSize: "0.9rem", outline: "none" }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Titulo (opcional)"
+                      value={newLinkTitle}
+                      onChange={(e) => setNewLinkTitle(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addLinkToCatalog()}
+                      style={{ flex: 1, minWidth: 150, padding: "10px 14px", borderRadius: 8, background: "#0a0a0f", border: "1px solid #2a2a35", color: "#fff", fontSize: "0.9rem", outline: "none" }}
+                    />
+                    <button onClick={addLinkToCatalog} style={{ padding: "10px 20px", borderRadius: 8, background: "#e8ff47", color: "#000", border: "none", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>+ Añadir</button>
+                  </div>
+                </div>
+
+                {/* Links list */}
+                {openCatalog.links.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-title">Catalogo vacio</div>
+                    <div className="empty-desc">Añade el primer enlace de YouTube arriba.</div>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
+                    {openCatalog.links.map((link) => (
+                      <div key={link.id} style={{ background: "#1a1a22", borderRadius: 12, overflow: "hidden", border: "1px solid #2a2a35" }}>
+                        {link.ytId && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={`https://img.youtube.com/vi/${link.ytId}/mqdefault.jpg`} alt={link.title} style={{ width: "100%", aspectRatio: "16/9", objectFit: "cover", display: "block" }} />
+                        )}
+                        <div style={{ padding: 14 }}>
+                          <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "#fff", marginBottom: 8, lineHeight: 1.4 }}>{link.title}</div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <a href={link.url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, textAlign: "center", padding: "6px 0", borderRadius: 6, background: "#e8ff47", color: "#000", fontWeight: 700, fontSize: "0.8rem", textDecoration: "none" }}>Ver video</a>
+                            <button onClick={() => deleteLinkFromCatalog(link.id)} style={{ padding: "6px 12px", borderRadius: 6, background: "transparent", color: "#e55", border: "1px solid #e55", fontSize: "0.8rem", cursor: "pointer" }}>Quitar</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </main>
         )}

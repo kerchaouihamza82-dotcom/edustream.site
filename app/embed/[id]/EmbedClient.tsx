@@ -25,12 +25,16 @@ export default function EmbedClient({ ytId, title, embedId }) {
   const [progress,     setProgress]     = useState(0);
   const [timeCur,      setTimeCur]      = useState("0:00");
   const [timeTot,      setTimeTot]      = useState("0:00");
-  const [showControls, setShowControls] = useState(false);
+  const [showControls, setShowControls] = useState(true); // start visible
   const [isMobile,     setIsMobile]     = useState(false);
   const [isFs,         setIsFs]         = useState(false);
 
+  // Detect mobile after mount — SSR always returns false
+  const isMobileRef = useRef(false);
   useEffect(() => {
-    setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768);
+    const mobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+    setIsMobile(mobile);
+    isMobileRef.current = mobile;
   }, []);
 
   // Pre-fetch a 15-min signed token on mount so the iOS click handler is synchronous.
@@ -57,18 +61,14 @@ export default function EmbedClient({ ytId, title, embedId }) {
 
   const scheduleHide = () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    // Never auto-hide when paused — YouTube shows its own UI when paused and controls are hidden
     hideTimerRef.current = setTimeout(() => {
-      setShowControls((prev) => {
-        // Keep controls visible if video is paused
-        if (!playerRef.current) return false;
-        try {
-          const state = playerRef.current.getPlayerState?.();
-          const YT = (window as any).YT;
-          if (YT && state === YT.PlayerState.PAUSED) return true;
-        } catch (_) {}
-        return false;
-      });
+      // Never hide when paused — YouTube shows its own UI when our controls are hidden
+      try {
+        const state = playerRef.current?.getPlayerState?.();
+        const YT = (window as any).YT;
+        if (YT && state === YT.PlayerState.PAUSED) return;
+      } catch (_) {}
+      setShowControls(false);
     }, HIDE_DELAY);
   };
 
@@ -141,13 +141,13 @@ export default function EmbedClient({ ytId, title, embedId }) {
             if (mobile) {
               e.target.mute();
               setMuted(true);
-              setShowControls(true);
-              if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-              hideTimerRef.current = setTimeout(() => setShowControls(false), 5000);
             }
+            setShowControls(true);
             setPlaying(true);
             e.target.playVideo();
             startTimer();
+            // Auto-hide controls after initial display
+            scheduleHide();
           },
           onStateChange: (e) => {
             const YT = window.YT;
@@ -336,21 +336,16 @@ export default function EmbedClient({ ytId, title, embedId }) {
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
       />
 
-      {/* Interaction overlay — ALWAYS pointerEvents auto, covers the entire player.
-          This is the single source of truth for all user interaction.
-          It NEVER toggles pointerEvents so hover is always consistent across
-          multiple enter/leave cycles. Clicks are routed to togglePlay.
-          The controls buttons sit above this at zIndex 10 and handle their own clicks. */}
+      {/* Interaction overlay — always pointerEvents auto.
+          Desktop: mouse movement reveals controls, click toggles play.
+          Mobile: tap toggles controls visibility with auto-hide when playing. */}
       <div
-        style={{
-          position: "absolute", inset: 0, zIndex: 5, background: "transparent",
-          pointerEvents: "auto",
-        }}
-        onMouseMove={isMobile ? undefined : revealControls}
-        onMouseEnter={isMobile ? undefined : revealControls}
-        onMouseLeave={isMobile ? undefined : scheduleHide}
+        style={{ position: "absolute", inset: 0, zIndex: 5, background: "transparent", pointerEvents: "auto" }}
+        onMouseMove={!isMobile ? revealControls : undefined}
+        onMouseEnter={!isMobile ? revealControls : undefined}
+        onMouseLeave={!isMobile ? scheduleHide : undefined}
         onTouchEnd={isMobile ? handleTouch : undefined}
-        onClick={isMobile ? undefined : togglePlay}
+        onClick={!isMobile ? togglePlay : undefined}
       />
 
       {/* Controls overlay — pointerEvents none on the container so the interaction

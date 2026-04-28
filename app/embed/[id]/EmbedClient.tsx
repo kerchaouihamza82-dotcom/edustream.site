@@ -244,12 +244,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
         // Handle mouse at the wrapper level — works even when mouse is over iframe
         cursor: "default",
       }}
-      // Mouse handlers on the WRAPPER — not the overlay.
-      // The wrapper always fires onMouseMove regardless of what's underneath
-      // because it's the outermost container. This fixes the "hover doesn't work" bug.
-      onMouseMove={!isMobile ? revealControls : undefined}
-      onMouseEnter={!isMobile ? revealControls : undefined}
-      onMouseLeave={!isMobile ? scheduleHide : undefined}
+
     >
       {/* YouTube iframe — pointerEvents none always. We handle all interaction ourselves. */}
       <div
@@ -258,9 +253,13 @@ export default function EmbedClient({ ytId, title, embedId }) {
       />
 
       {/* Click capture layer — sits above iframe, below controls.
-          Desktop: click toggles play. Mobile: tap toggles controls. */}
+          Desktop: mouse events here because children absorb events before wrapper.
+          Click toggles play. Mobile: tap toggles controls. */}
       <div
         style={{ position: "absolute", inset: 0, zIndex: 5, background: "transparent" }}
+        onMouseMove={!isMobile ? revealControls : undefined}
+        onMouseEnter={!isMobile ? revealControls : undefined}
+        onMouseLeave={!isMobile ? scheduleHide : undefined}
         onClick={!isMobile ? togglePlay : undefined}
         onTouchEnd={isMobile ? (e) => {
           // If touch was on a button, let the button handle it

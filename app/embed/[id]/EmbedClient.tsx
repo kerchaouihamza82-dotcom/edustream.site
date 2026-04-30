@@ -54,14 +54,17 @@ export default function EmbedClient({ ytId, title, embedId }) {
   }, [embedId]);
 
   // ── Controls visibility ────────────────────────────────────────────────────
-  const scheduleHide = () => {
+  const cancelHide = () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  };
+
+  const scheduleHide = () => {
+    cancelHide();
     hideTimerRef.current = setTimeout(() => {
-      // Never hide when paused
       try {
         const YT = (window as any).YT;
         const state = playerRef.current?.getPlayerState?.();
-        if (YT && state === YT.PlayerState.PAUSED) return;
+        if (YT && state === YT.PlayerState.PAUSED) return; // never hide while paused
       } catch (_) {}
       setShowControls(false);
     }, HIDE_DELAY);
@@ -72,9 +75,22 @@ export default function EmbedClient({ ytId, title, embedId }) {
     scheduleHide();
   };
 
-  const cancelHide = () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-  };
+  // Attach native mousemove + mouseleave to the wrapper using a ref effect.
+  // Native addEventListener fires before React synthetic events and is NOT
+  // affected by pointer-events or z-index of children — it always fires on
+  // the registered element regardless of what's layered on top.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onMove  = () => { if (!isMobileRef.current) revealControls(); };
+    const onLeave = () => { if (!isMobileRef.current) scheduleHide(); };
+    el.addEventListener("mousemove",  onMove);
+    el.addEventListener("mouseleave", onLeave);
+    return () => {
+      el.removeEventListener("mousemove",  onMove);
+      el.removeEventListener("mouseleave", onLeave);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── YouTube player setup ───────────────────────────────────────────────────
   useEffect(() => {
@@ -257,9 +273,6 @@ export default function EmbedClient({ ytId, title, embedId }) {
           Click toggles play. Mobile: tap toggles controls. */}
       <div
         style={{ position: "absolute", inset: 0, zIndex: 5, background: "transparent" }}
-        onMouseMove={!isMobile ? revealControls : undefined}
-        onMouseEnter={!isMobile ? revealControls : undefined}
-        onMouseLeave={!isMobile ? scheduleHide : undefined}
         onClick={!isMobile ? togglePlay : undefined}
         onTouchEnd={isMobile ? (e) => {
           // If touch was on a button, let the button handle it
@@ -302,10 +315,7 @@ export default function EmbedClient({ ytId, title, embedId }) {
             position: "relative", zIndex: 1,
             pointerEvents: showControls ? "auto" : "none",
           }}
-          // Stop mouse events from bubbling to wrapper and resetting the hide timer
-          onMouseMove={(e) => e.stopPropagation()}
-          onMouseEnter={(e) => { e.stopPropagation(); cancelHide(); }}
-          onMouseLeave={(e) => { e.stopPropagation(); scheduleHide(); }}
+
         >
           {/* Title */}
           <div style={{
